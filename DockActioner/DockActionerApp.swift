@@ -1,6 +1,6 @@
 //
-//  DockAppExposeApp.swift
-//  DockAppExpose
+//  DockActionerApp.swift
+//  DockActioner
 //
 //  Created by Alex on 27/12/2025.
 //
@@ -9,7 +9,7 @@ import SwiftUI
 import AppKit
 
 @main
-struct DockAppExposeApp: App {
+struct DockActionerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var body: some Scene {
         WindowGroup {

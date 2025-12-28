@@ -25,7 +25,7 @@ struct PreferencesView: View {
             Image(systemName: "rectangle.dock")
                 .font(.system(size: 28, weight: .semibold))
             VStack(alignment: .leading, spacing: 4) {
-                Text("DockAppExpose")
+                Text("DockActioner")
                     .font(.title3).fontWeight(.semibold)
             }
             Spacer()
@@ -89,7 +89,7 @@ struct PreferencesView: View {
         sectionBox {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Show settings on startup", isOn: $preferences.showOnStartup)
-                Toggle("Start DockAppExpose at login", isOn: $preferences.startAtLogin)
+                Toggle("Start DockActioner at login", isOn: $preferences.startAtLogin)
             }
         }
     }

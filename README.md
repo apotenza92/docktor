@@ -1,4 +1,4 @@
-# DockAppExpose
+# DockActioner
 
 A macOS application that enhances your Dock with customizable click and scroll gestures for app management.
 
@@ -12,27 +12,27 @@ A macOS application that enhances your Dock with customizable click and scroll g
 ## Installation
 
 1. Build the project in Xcode or download a pre-built release
-2. Copy `DockAppExpose.app` to `/Applications`
+2. Copy `DockActioner.app` to `/Applications`
 3. Launch the app
 4. Grant required permissions when prompted
 
 ## Permissions
 
-DockAppExpose requires two permissions:
+DockActioner requires two permissions:
 
 ### 1. Accessibility Permission
 **Required** - Allows the app to detect clicks and scrolls on Dock icons.
 
 To grant:
 1. System Settings > Privacy & Security > Accessibility
-2. Enable DockAppExpose
+2. Enable DockActioner
 
 ### 2. Automation Permission
 **Required** - Allows the app to trigger App Exposé and manage windows.
 
 To grant:
 1. System Settings > Privacy & Security > Automation
-2. Enable DockAppExpose for System Events
+2. Enable DockActioner for System Events
 
 ## Usage
 
@@ -89,7 +89,7 @@ The app appears in your menu bar with a Dock icon. Click it to:
 ## Building from Source
 
 1. Clone the repository
-2. Open `DockAppExpose.xcodeproj` in Xcode
+2. Open `DockActioner.xcodeproj` in Xcode
 3. Build and run (⌘R)
 4. The app will be staged to `/Applications` automatically
 

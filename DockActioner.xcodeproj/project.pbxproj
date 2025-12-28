@@ -7,26 +7,26 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		FA12B1922EFF98EC00DB8333 /* DockAppExpose.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DockAppExpose.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FA12B1922EFF98EC00DB8333 /* DockActioner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DockActioner.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		FA12B1CA2EFF9E7F00DB8333 /* Exceptions for "DockAppExpose" folder in "DockAppExpose" target */ = {
+		FA12B1CA2EFF9E7F00DB8333 /* Exceptions for "DockActioner" folder in "DockActioner" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = FA12B1912EFF98EC00DB8333 /* DockAppExpose */;
+			target = FA12B1912EFF98EC00DB8333 /* DockActioner */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		FA12B1942EFF98EC00DB8333 /* DockAppExpose */ = {
+		FA12B1942EFF98EC00DB8333 /* DockActioner */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				FA12B1CA2EFF9E7F00DB8333 /* Exceptions for "DockAppExpose" folder in "DockAppExpose" target */,
+				FA12B1CA2EFF9E7F00DB8333 /* Exceptions for "DockActioner" folder in "DockActioner" target */,
 			);
-			path = DockAppExpose;
+			path = DockActioner;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -45,7 +45,7 @@
 		FA12B1892EFF98EC00DB8333 = {
 			isa = PBXGroup;
 			children = (
-				FA12B1942EFF98EC00DB8333 /* DockAppExpose */,
+				FA12B1942EFF98EC00DB8333 /* DockActioner */,
 				FA12B1932EFF98EC00DB8333 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -53,7 +53,7 @@
 		FA12B1932EFF98EC00DB8333 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				FA12B1922EFF98EC00DB8333 /* DockAppExpose.app */,
+				FA12B1922EFF98EC00DB8333 /* DockActioner.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -61,9 +61,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		FA12B1912EFF98EC00DB8333 /* DockAppExpose */ = {
+		FA12B1912EFF98EC00DB8333 /* DockActioner */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = FA12B19D2EFF98ED00DB8333 /* Build configuration list for PBXNativeTarget "DockAppExpose" */;
+			buildConfigurationList = FA12B19D2EFF98ED00DB8333 /* Build configuration list for PBXNativeTarget "DockActioner" */;
 			buildPhases = (
 				FA12B18E2EFF98EC00DB8333 /* Sources */,
 				FA12B18F2EFF98EC00DB8333 /* Frameworks */,
@@ -75,13 +75,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				FA12B1942EFF98EC00DB8333 /* DockAppExpose */,
+				FA12B1942EFF98EC00DB8333 /* DockActioner */,
 			);
-			name = DockAppExpose;
+			name = DockActioner;
 			packageProductDependencies = (
 			);
-			productName = DockAppExpose;
-			productReference = FA12B1922EFF98EC00DB8333 /* DockAppExpose.app */;
+			productName = DockActioner;
+			productReference = FA12B1922EFF98EC00DB8333 /* DockActioner.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -99,7 +99,7 @@
 					};
 				};
 			};
-			buildConfigurationList = FA12B18D2EFF98EC00DB8333 /* Build configuration list for PBXProject "DockAppExpose" */;
+			buildConfigurationList = FA12B18D2EFF98EC00DB8333 /* Build configuration list for PBXProject "DockActioner" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -113,7 +113,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				FA12B1912EFF98EC00DB8333 /* DockAppExpose */,
+				FA12B1912EFF98EC00DB8333 /* DockActioner */,
 			);
 		};
 /* End PBXProject section */
@@ -291,7 +291,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = DockAppExpose/Info.plist;
+				INFOPLIST_FILE = DockActioner/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -299,7 +299,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = pzc.DockAppExpose;
+				PRODUCT_BUNDLE_IDENTIFIER = pzc.DockActioner;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -323,7 +323,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = DockAppExpose/Info.plist;
+				INFOPLIST_FILE = DockActioner/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -331,7 +331,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = pzc.DockAppExpose;
+				PRODUCT_BUNDLE_IDENTIFIER = pzc.DockActioner;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -346,7 +346,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		FA12B18D2EFF98EC00DB8333 /* Build configuration list for PBXProject "DockAppExpose" */ = {
+		FA12B18D2EFF98EC00DB8333 /* Build configuration list for PBXProject "DockActioner" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				FA12B19B2EFF98ED00DB8333 /* Debug */,
@@ -355,7 +355,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		FA12B19D2EFF98ED00DB8333 /* Build configuration list for PBXNativeTarget "DockAppExpose" */ = {
+		FA12B19D2EFF98ED00DB8333 /* Build configuration list for PBXNativeTarget "DockActioner" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				FA12B19E2EFF98ED00DB8333 /* Debug */,

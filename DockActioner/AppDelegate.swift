@@ -35,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func configureStatusItem() {
         Logger.log("Configuring status item.")
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "rectangle.dock", accessibilityDescription: "DockAppExpose")
+        item.button?.image = NSImage(systemSymbolName: "rectangle.dock", accessibilityDescription: "DockActioner")
         item.menu = buildMenu()
         statusItem = item
     }
@@ -60,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: "Quit DockAppExpose",
+        let quitItem = NSMenuItem(title: "Quit DockActioner",
                                   action: #selector(quit),
                                   keyEquivalent: "q")
         quitItem.target = self

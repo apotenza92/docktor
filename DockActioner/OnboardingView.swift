@@ -7,7 +7,7 @@ struct OnboardingView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Title
-            Text("DockAppExpose")
+            Text("DockActioner")
                 .font(.title3)
                 .fontWeight(.semibold)
                 .padding(.top, 30)

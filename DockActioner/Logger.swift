@@ -1,12 +1,12 @@
 import Foundation
 
 /// Lightweight logger that writes to unified logging (NSLog) and a per-run log file
-/// under ~/Code/DockAppExpose/logs/DockAppExpose-<timestamp>.log so you can find it alongside the project.
+/// under ~/Code/DockActioner/logs/DockActioner-<timestamp>.log so you can find it alongside the project.
 enum Logger {
     private static let queue = DispatchQueue(label: "com.dockappexpose.logger")
     private static let logDirectory: URL = {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Code/DockAppExpose/logs")
+            .appendingPathComponent("Code/DockActioner/logs")
     }()
 
     private static let logURL: URL = {
@@ -14,11 +14,11 @@ enum Logger {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         let stamp = formatter.string(from: Date())
-        return logDirectory.appendingPathComponent("DockAppExpose-\(stamp).log")
+        return logDirectory.appendingPathComponent("DockActioner-\(stamp).log")
     }()
 
     static func log(_ message: String) {
-        let line = "DockAppExpose: \(message)"
+        let line = "DockActioner: \(message)"
         NSLog("%@", line)
         queue.async {
             writeLine(line)
