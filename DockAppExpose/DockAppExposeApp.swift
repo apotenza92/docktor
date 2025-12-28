@@ -6,12 +6,18 @@
 //
 
 import SwiftUI
+import AppKit
 
 @main
 struct DockAppExposeApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            PreferencesView(coordinator: DockExposeCoordinator.shared)
         }
+        .defaultSize(width: 420, height: 520)
+        .windowResizability(.contentSize)
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unifiedCompact)
     }
 }
