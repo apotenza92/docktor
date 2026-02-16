@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import ApplicationServices
 
 @MainActor
 final class DockExposeCoordinator: ObservableObject {
@@ -17,12 +18,43 @@ final class DockExposeCoordinator: ObservableObject {
     private var lastScrollTime: TimeInterval?
     private var lastMinimizeToggleTime: [String: TimeInterval] = [:]
     private let minimizeToggleCooldown: TimeInterval = 1.0
+    private let appExposeImageDiffThreshold: Double = 0.035
 
     @Published private(set) var isRunning = false
     @Published private(set) var accessibilityGranted = AXIsProcessTrusted()
+    @Published private(set) var inputMonitoringGranted = CGPreflightListenEventAccess()
+    @Published private(set) var secureEventInputEnabled = SecureEventInput.isEnabled()
+
+    // Diagnostics
+    @Published private(set) var lastStartError: String?
+    @Published private(set) var tapEventsSeen: Int = 0
+    @Published private(set) var tapClicksSeen: Int = 0
+    @Published private(set) var tapScrollsSeen: Int = 0
+    @Published private(set) var lastTapEventAt: Date?
+    @Published private(set) var lastTapEventType: String?
+    @Published private(set) var lastDockBundleHit: String?
+    @Published private(set) var lastDockBundleHitAt: Date?
+    @Published var diagnosticsCaptureActive: Bool = false
+
+    @Published private(set) var selfTestStatus: String?
+    private var selfTestActive: Bool = false
+
+    @Published private(set) var functionalTestStatus: String?
+    @Published private(set) var appExposeHotkeyTestStatus: String?
+
+    @Published private(set) var lastActionExecuted: DockAction?
+    @Published private(set) var lastActionExecutedBundle: String?
+    @Published private(set) var lastActionExecutedSource: String?
+    @Published private(set) var lastActionExecutedAt: Date?
+
+    @Published private(set) var fullTestStatus: String?
+
+    var isAppExposeShortcutConfigured: Bool {
+        invoker.isDockNotificationAvailable()
+    }
 
     var isEnabled: Bool {
-        isRunning && accessibilityGranted
+        isRunning && accessibilityGranted && inputMonitoringGranted
     }
 
     // Backwards compatibility for callers expecting this name.
@@ -30,26 +62,44 @@ final class DockExposeCoordinator: ObservableObject {
         accessibilityGranted
     }
 
-    func startIfPossible() {
+    func refreshPermissionsAndSecurityState() {
         accessibilityGranted = AXIsProcessTrusted()
+        inputMonitoringGranted = CGPreflightListenEventAccess()
+        secureEventInputEnabled = SecureEventInput.isEnabled()
+    }
+
+    func startIfPossible() {
+        refreshPermissionsAndSecurityState()
         guard accessibilityGranted else {
             Logger.log("startIfPossible: denied (no accessibility).")
             return
+        }
+        guard inputMonitoringGranted else {
+            Logger.log("startIfPossible: denied (no input monitoring).")
+            return
+        }
+        if secureEventInputEnabled {
+            Logger.log("startIfPossible: Secure Event Input is enabled; synthetic hotkeys may be ignored.")
         }
         guard !isRunning else {
             Logger.log("startIfPossible: already running.")
             return
         }
+        lastStartError = nil
         isRunning = eventTap.start(
             clickHandler: { [weak self] point, button, flags in
                 return self?.handleClick(at: point, buttonNumber: button, flags: flags) ?? false
             },
             scrollHandler: { [weak self] point, direction, flags in
                 return self?.handleScroll(at: point, direction: direction, flags: flags) ?? false
+            },
+            anyEventHandler: { [weak self] type in
+                self?.recordTapEvent(type)
             }
         )
         if !isRunning {
-            Logger.log("Failed to start event tap.")
+            lastStartError = eventTap.lastStartError
+            Logger.log("Failed to start event tap. error=\(lastStartError ?? "unknown")")
         } else {
             Logger.log("Event tap started.")
         }
@@ -61,14 +111,608 @@ final class DockExposeCoordinator: ObservableObject {
         Logger.log("Event tap stopped.")
     }
 
+    func runSelfTest() {
+        selfTestStatus = nil
+
+        refreshPermissionsAndSecurityState()
+
+        guard accessibilityGranted else {
+            selfTestStatus = "Self-test failed: Accessibility not granted"
+            return
+        }
+        guard inputMonitoringGranted else {
+            selfTestStatus = "Self-test failed: Input Monitoring not granted"
+            return
+        }
+
+        if !isRunning {
+            startIfPossible()
+        }
+        guard isRunning else {
+            selfTestStatus = "Self-test failed: event tap not running (\(lastStartError ?? "unknown error"))"
+            return
+        }
+
+        // Find an actual Dock icon location by probing along display edges.
+        guard let (point, bundle) = findAnyDockIconPoint() else {
+            selfTestStatus = "Self-test failed: couldn't find any Dock icon point"
+            return
+        }
+
+        selfTestStatus = "Self-test: found Dock icon \(bundle) at (\(Int(point.x)), \(Int(point.y)))"
+
+        runDiagnosticsCapture(seconds: 2.0)
+        selfTestActive = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            self?.selfTestActive = false
+        }
+
+        postSyntheticScroll(at: point, deltaY: 4)
+        postSyntheticScroll(at: point, deltaY: -4)
+        postSyntheticClick(at: point)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self else { return }
+            let hit = self.lastDockBundleHit ?? "nil"
+            self.selfTestStatus = "Self-test: eventsSeen=\(tapEventsSeen) clicks=\(tapClicksSeen) scrolls=\(tapScrollsSeen) lastDockHit=\(hit)"
+        }
+    }
+
+    func runFunctionalTest() {
+        functionalTestStatus = nil
+
+        refreshPermissionsAndSecurityState()
+
+        guard accessibilityGranted else {
+            functionalTestStatus = "Functional test failed: Accessibility not granted"
+            return
+        }
+        guard inputMonitoringGranted else {
+            functionalTestStatus = "Functional test failed: Input Monitoring not granted"
+            return
+        }
+        if !isRunning {
+            startIfPossible()
+        }
+        guard isRunning else {
+            functionalTestStatus = "Functional test failed: event tap not running (\(lastStartError ?? "unknown error"))"
+            return
+        }
+
+        // Best-effort: try to ensure there is at least one other regular app to hide.
+        // Do not activate any apps here (it can look like we "clicked" them).
+        let regularApps = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .filter { $0.bundleIdentifier != Bundle.main.bundleIdentifier }
+        if regularApps.count <= 1 {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.calculator") {
+                let cfg = NSWorkspace.OpenConfiguration()
+                cfg.activates = false
+                cfg.addsToRecentItems = false
+                NSWorkspace.shared.openApplication(at: url, configuration: cfg) { _, _ in }
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self else { return }
+            guard let (point, bundle) = self.findAnyDockIconPoint() else {
+                self.functionalTestStatus = "Functional test failed: couldn't find a Dock icon point"
+                return
+            }
+
+            // Force known mappings for the run.
+            self.preferences.scrollUpAction = .hideOthers
+            self.preferences.scrollDownAction = .appExpose
+            self.preferences.clickAction = .hideApp
+
+            self.functionalTestStatus = "Functional test: targeting \(bundle) at (\(Int(point.x)), \(Int(point.y)))"
+
+            // Trigger scroll-up (hide others) then verify at least one other app became hidden.
+            self.postSyntheticScroll(at: point, deltaY: -6)
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self else { return }
+                let hiddenRegularApps = NSWorkspace.shared.runningApplications
+                    .filter { $0.activationPolicy == .regular }
+                    .filter { $0.isHidden }
+                    .map { $0.bundleIdentifier ?? "?" }
+
+                Logger.log("Functional test: hidden regular apps after hideOthers: \(hiddenRegularApps)")
+
+                // Cleanup: show all apps back.
+                _ = WindowManager.showAllApplications()
+
+                self.functionalTestStatus = "Functional test: hideOthers hiddenCount=\(hiddenRegularApps.count). (App Expose test logs only.)"
+
+                // Trigger scroll-down (app expose). We can't reliably assert Mission Control UI state,
+                // but we can at least exercise the code path.
+                self.postSyntheticScroll(at: point, deltaY: 6)
+            }
+        }
+    }
+
+    func runFullTestSuite() {
+        fullTestStatus = "Running full test suite..."
+        Task { [weak self] in
+            guard let self else { return }
+            refreshPermissionsAndSecurityState()
+            let suite = ActionTestSuite(coordinator: self)
+            let target = ProcessInfo.processInfo.environment["DOCKACTIONER_TEST_TARGET"] ?? "com.apple.calculator"
+            let results = await suite.runAll(targetBundleIdentifier: target)
+
+            let passed = results.filter { $0.passed }.count
+            let total = results.count
+            let failed = results.filter { !$0.passed }
+
+            Logger.log("Full test suite: passed \(passed)/\(total)")
+            for f in failed.prefix(12) {
+                Logger.log("Test FAIL \(f.trigger.rawValue) \(f.action.rawValue): \(f.detail)")
+            }
+            if failed.count > 12 {
+                Logger.log("... plus \(failed.count - 12) more failures")
+            }
+
+            fullTestStatus = "Full test suite: passed \(passed)/\(total). (See log for details.)"
+
+            if ProcessInfo.processInfo.environment["DOCKACTIONER_TEST_SUITE"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+    }
+
+    func findDockIconPoint(bundleIdentifier: String) -> CGPoint? {
+        var count: UInt32 = 0
+        if CGGetActiveDisplayList(0, nil, &count) != .success || count == 0 {
+            return nil
+        }
+        var displays = Array(repeating: CGDirectDisplayID(0), count: Int(count))
+        if CGGetActiveDisplayList(count, &displays, &count) != .success {
+            return nil
+        }
+
+        for id in displays {
+            let b = CGDisplayBounds(id)
+
+            // If the Dock is set to auto-hide, it may not be hittable unless the cursor is near the edge.
+            postSyntheticMouseMove(to: CGPoint(x: b.midX, y: b.maxY - 1))
+            postSyntheticMouseMove(to: CGPoint(x: b.minX + 1, y: b.midY))
+            postSyntheticMouseMove(to: CGPoint(x: b.maxX - 1, y: b.midY))
+            usleep(60_000)
+
+            if let p = probeEdgeForBundle(bounds: b, edge: .bottom, bundleIdentifier: bundleIdentifier) { return p }
+            if let p = probeEdgeForBundle(bounds: b, edge: .left, bundleIdentifier: bundleIdentifier) { return p }
+            if let p = probeEdgeForBundle(bounds: b, edge: .right, bundleIdentifier: bundleIdentifier) { return p }
+        }
+        return nil
+    }
+
+    func postSyntheticMouseMove(to point: CGPoint) {
+        guard let source = CGEventSource(stateID: .hidSystemState) else { return }
+        if let ev = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left) {
+            ev.flags = []
+            ev.setIntegerValueField(.eventSourceUserData, value: 0xD0C0A11)
+            ev.post(tap: .cghidEventTap)
+        }
+    }
+
+    private struct DisplaySnapshot {
+        let image: CGImage
+        let url: URL?
+    }
+
+    private struct ImageDiffMetrics {
+        let meanAbsDelta: Double
+        let changedPixelRatio: Double
+        let sampledPixels: Int
+    }
+
+    private struct DockWindowSignature: Hashable {
+        let layer: Int
+        let widthBucket: Int
+        let heightBucket: Int
+        let alphaBucket: Int
+        let title: String
+    }
+
+    private func captureMainDisplaySnapshot(tag: String) -> DisplaySnapshot? {
+        guard let cgImage = CGDisplayCreateImage(CGMainDisplayID()) else { return nil }
+
+        var writtenURL: URL?
+        let rep = NSBitmapImageRep(cgImage: cgImage)
+        if let png = rep.representation(using: .png, properties: [:]) {
+            let stamp = Int(Date().timeIntervalSince1970 * 1000)
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("DockActioner-\(tag)-\(stamp).png")
+            do {
+                try png.write(to: url)
+                writtenURL = url
+            } catch {
+                Logger.log("Failed to write snapshot \(tag): \(error.localizedDescription)")
+            }
+        }
+
+        return DisplaySnapshot(image: cgImage, url: writtenURL)
+    }
+
+    private func downsampledRGBA(_ image: CGImage, width: Int = 320, height: Int = 180) -> [UInt8]? {
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(data: &pixels,
+                                      width: width,
+                                      height: height,
+                                      bitsPerComponent: 8,
+                                      bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.interpolationQuality = .low
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return pixels
+    }
+
+    private func imageDiffMetrics(before: CGImage, after: CGImage) -> ImageDiffMetrics? {
+        guard let lhs = downsampledRGBA(before), let rhs = downsampledRGBA(after), lhs.count == rhs.count else {
+            return nil
+        }
+
+        let pixelCount = lhs.count / 4
+        if pixelCount == 0 { return nil }
+
+        var totalDelta: UInt64 = 0
+        var changedPixels = 0
+        let channelThreshold = 24
+
+        var i = 0
+        while i + 3 < lhs.count {
+            let dr = abs(Int(lhs[i]) - Int(rhs[i]))
+            let dg = abs(Int(lhs[i + 1]) - Int(rhs[i + 1]))
+            let db = abs(Int(lhs[i + 2]) - Int(rhs[i + 2]))
+            let delta = dr + dg + db
+            totalDelta += UInt64(delta)
+            if delta >= channelThreshold {
+                changedPixels += 1
+            }
+            i += 4
+        }
+
+        let meanAbsDelta = Double(totalDelta) / Double(pixelCount * 3 * 255)
+        let changedPixelRatio = Double(changedPixels) / Double(pixelCount)
+        return ImageDiffMetrics(meanAbsDelta: meanAbsDelta,
+                                changedPixelRatio: changedPixelRatio,
+                                sampledPixels: pixelCount)
+    }
+
+    private func dockWindowSignatureSnapshot() -> Set<DockWindowSignature> {
+        guard let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+
+        var signatures = Set<DockWindowSignature>()
+        for window in raw {
+            guard let owner = window[kCGWindowOwnerName as String] as? String, owner == "Dock" else {
+                continue
+            }
+
+            let layer = window[kCGWindowLayer as String] as? Int ?? 0
+            let alpha = window[kCGWindowAlpha as String] as? Double ?? 1.0
+            let title = (window[kCGWindowName as String] as? String) ?? ""
+            let bounds = window[kCGWindowBounds as String] as? [String: Any]
+            let width = Int((bounds?["Width"] as? Double) ?? 0)
+            let height = Int((bounds?["Height"] as? Double) ?? 0)
+
+            let signature = DockWindowSignature(layer: layer,
+                                                widthBucket: width / 10,
+                                                heightBucket: height / 10,
+                                                alphaBucket: Int(alpha * 10.0),
+                                                title: title)
+            signatures.insert(signature)
+        }
+        return signatures
+    }
+
+    func testAppExposeHotkey() {
+        appExposeHotkeyTestStatus = nil
+        refreshPermissionsAndSecurityState()
+
+        guard accessibilityGranted else {
+            appExposeHotkeyTestStatus = "App Expose test: Accessibility not granted"
+            return
+        }
+        guard inputMonitoringGranted else {
+            appExposeHotkeyTestStatus = "App Expose test: Input Monitoring not granted"
+            return
+        }
+        if secureEventInputEnabled {
+            appExposeHotkeyTestStatus = "App Expose test: Secure Event Input is enabled (some apps block synthetic shortcuts)"
+        }
+
+        let selfBundle = Bundle.main.bundleIdentifier
+        let forcedBundle = ProcessInfo.processInfo.environment["DOCKACTIONER_APPEXPOSE_TARGET"]
+
+        var bundle = forcedBundle
+        if bundle == nil {
+            let front = FrontmostAppTracker.frontmostBundleIdentifier()
+            if let front, front != selfBundle {
+                bundle = front
+            }
+        }
+        if bundle == nil {
+            bundle = NSWorkspace.shared.runningApplications
+                .first(where: { $0.activationPolicy == .regular && $0.bundleIdentifier != selfBundle })?
+                .bundleIdentifier
+        }
+        let targetBundle = bundle ?? "unknown"
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == targetBundle }) {
+                _ = app.activate(options: [.activateIgnoringOtherApps])
+                try? await Task.sleep(nanoseconds: 180_000_000)
+            }
+
+            let before = captureMainDisplaySnapshot(tag: "before")
+            let dockBefore = dockWindowSignatureSnapshot()
+            let baseline = Date()
+            invoker.invokeApplicationWindows(for: targetBundle)
+
+            let resolved = invoker.lastResolvedHotKey
+                .map { "keyCode=\($0.keyCode) flags=\($0.flags.rawValue)" }
+                ?? "nil"
+            let resolveError = invoker.lastResolveError ?? "none"
+            let strategy = invoker.lastInvokeStrategy?.rawValue ?? "none"
+            let forced = invoker.lastForcedStrategy ?? (ProcessInfo.processInfo.environment["DOCKACTIONER_APPEXPOSE_STRATEGY"] ?? "none")
+            let attempts = invoker.lastInvokeAttempts.joined(separator: ",")
+
+            var bestMetrics: ImageDiffMetrics?
+            var bestSnapshot: DisplaySnapshot?
+            var maxDockSignatureDelta = 0
+
+            let sampleDelays: [UInt64] = [220_000_000, 420_000_000, 680_000_000]
+            for (index, delay) in sampleDelays.enumerated() {
+                try? await Task.sleep(nanoseconds: delay)
+                let after = captureMainDisplaySnapshot(tag: "after-\(index + 1)")
+                if let after {
+                    if let before, let metrics = imageDiffMetrics(before: before.image, after: after.image) {
+                        if bestMetrics == nil || metrics.changedPixelRatio > (bestMetrics?.changedPixelRatio ?? 0) {
+                            bestMetrics = metrics
+                            bestSnapshot = after
+                        }
+                    }
+                }
+
+                let dockAfter = dockWindowSignatureSnapshot()
+                let delta = dockBefore.symmetricDifference(dockAfter).count
+                if delta > maxDockSignatureDelta {
+                    maxDockSignatureDelta = delta
+                }
+            }
+
+            let front = FrontmostAppTracker.frontmostBundleIdentifier() ?? "nil"
+            let beforePath = before?.url?.path ?? "nil"
+            let afterPath = bestSnapshot?.url?.path ?? "nil"
+            let ratioText = bestMetrics.map { String(format: "%.4f", $0.changedPixelRatio) } ?? "unknown"
+            let meanText = bestMetrics.map { String(format: "%.4f", $0.meanAbsDelta) } ?? "unknown"
+            let sampleCount = bestMetrics?.sampledPixels ?? 0
+
+            let visualEvidenceStrong = (bestMetrics?.changedPixelRatio ?? 0) >= appExposeImageDiffThreshold
+            let dockEvidencePresent = maxDockSignatureDelta > 0
+            let evidence = visualEvidenceStrong || dockEvidencePresent || front == "com.apple.dock"
+
+            let base = "App Expose test: triggered for \(targetBundle) at \(baseline). strategy=\(strategy) forced=\(forced) attempts=\(attempts). resolved=\(resolved) resolveError=\(resolveError). frontmost=\(front). diffChangedRatio=\(ratioText) diffMean=\(meanText) pixels=\(sampleCount) dockSignatureDelta=\(maxDockSignatureDelta) evidence=\(evidence). before=\(beforePath). after=\(afterPath)"
+
+            if let prior = appExposeHotkeyTestStatus, !prior.isEmpty {
+                appExposeHotkeyTestStatus = "\(prior)\n\(base)"
+            } else {
+                appExposeHotkeyTestStatus = base
+            }
+            Logger.log(appExposeHotkeyTestStatus ?? base)
+        }
+    }
+
+    private func findAnyDockIconPoint() -> (CGPoint, String)? {
+        var count: UInt32 = 0
+        if CGGetActiveDisplayList(0, nil, &count) != .success || count == 0 {
+            return nil
+        }
+        var displays = Array(repeating: CGDirectDisplayID(0), count: Int(count))
+        if CGGetActiveDisplayList(count, &displays, &count) != .success {
+            return nil
+        }
+
+        for id in displays {
+            let b = CGDisplayBounds(id)
+
+            // Bottom edge probe (most common).
+            if let match = probeEdge(bounds: b, edge: .bottom) { return match }
+            if let match = probeEdge(bounds: b, edge: .left) { return match }
+            if let match = probeEdge(bounds: b, edge: .right) { return match }
+        }
+        return nil
+    }
+
+    private enum Edge { case bottom, left, right }
+
+    private func bundleIdentifierNearPoint(_ point: CGPoint) -> String? {
+        if let b = DockHitTest.bundleIdentifierAtPoint(point) {
+            return b
+        }
+        // AX hit-testing can be quite sensitive to being exactly on top of the icon; sample a small grid.
+        let offsets: [CGFloat] = [-10, 0, 10]
+        for dy in offsets {
+            for dx in offsets {
+                if dx == 0 && dy == 0 { continue }
+                let p = CGPoint(x: point.x + dx, y: point.y + dy)
+                if let b = DockHitTest.bundleIdentifierAtPoint(p) {
+                    return b
+                }
+            }
+        }
+        return nil
+    }
+
+    private func probeEdge(bounds: CGRect, edge: Edge) -> (CGPoint, String)? {
+        let margin: CGFloat = 16
+        let step: CGFloat = 18
+        let startInset: CGFloat = 60
+
+        switch edge {
+        case .bottom:
+            let y = bounds.maxY - margin
+            var x = bounds.minX + startInset
+            while x < bounds.maxX - startInset {
+                let p = CGPoint(x: x, y: y)
+                if let bundle = bundleIdentifierNearPoint(p) {
+                    return (p, bundle)
+                }
+                x += step
+            }
+        case .left:
+            let x = bounds.minX + margin
+            var y = bounds.minY + startInset
+            while y < bounds.maxY - startInset {
+                let p = CGPoint(x: x, y: y)
+                if let bundle = bundleIdentifierNearPoint(p) {
+                    return (p, bundle)
+                }
+                y += step
+            }
+        case .right:
+            let x = bounds.maxX - margin
+            var y = bounds.minY + startInset
+            while y < bounds.maxY - startInset {
+                let p = CGPoint(x: x, y: y)
+                if let bundle = bundleIdentifierNearPoint(p) {
+                    return (p, bundle)
+                }
+                y += step
+            }
+        }
+        return nil
+    }
+
+    private func probeEdgeForBundle(bounds: CGRect, edge: Edge, bundleIdentifier: String) -> CGPoint? {
+        let margin: CGFloat = 10
+        let step: CGFloat = 16
+        let startInset: CGFloat = 40
+        let depth: CGFloat = 240
+        let depthStep: CGFloat = 8
+
+        switch edge {
+        case .bottom:
+            var y = bounds.maxY - margin
+            while y > bounds.maxY - depth {
+                var x = bounds.minX + startInset
+                while x < bounds.maxX - startInset {
+                    let p = CGPoint(x: x, y: y)
+                    if let bundle = bundleIdentifierNearPoint(p), bundle == bundleIdentifier {
+                        return p
+                    }
+                    x += step
+                }
+                y -= depthStep
+            }
+        case .left:
+            var x = bounds.minX + margin
+            while x < bounds.minX + depth {
+                var y = bounds.minY + startInset
+                while y < bounds.maxY - startInset {
+                    let p = CGPoint(x: x, y: y)
+                    if let bundle = bundleIdentifierNearPoint(p), bundle == bundleIdentifier {
+                        return p
+                    }
+                    y += step
+                }
+                x += depthStep
+            }
+        case .right:
+            var x = bounds.maxX - margin
+            while x > bounds.maxX - depth {
+                var y = bounds.minY + startInset
+                while y < bounds.maxY - startInset {
+                    let p = CGPoint(x: x, y: y)
+                    if let bundle = bundleIdentifierNearPoint(p), bundle == bundleIdentifier {
+                        return p
+                    }
+                    y += step
+                }
+                x -= depthStep
+            }
+        }
+        return nil
+    }
+
+    func postSyntheticClick(at point: CGPoint) {
+        guard let source = CGEventSource(stateID: .hidSystemState) else { return }
+        if let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left) {
+            down.flags = []
+            down.setIntegerValueField(.eventSourceUserData, value: 0xD0C0A11)
+            down.post(tap: .cghidEventTap)
+        }
+        if let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) {
+            up.flags = []
+            up.setIntegerValueField(.eventSourceUserData, value: 0xD0C0A11)
+            up.post(tap: .cghidEventTap)
+        }
+    }
+
+    func postSyntheticScroll(at point: CGPoint, deltaY: Int32) {
+        guard let source = CGEventSource(stateID: .hidSystemState) else { return }
+        guard let ev = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 1, wheel1: deltaY, wheel2: 0, wheel3: 0) else { return }
+        ev.location = point
+        ev.flags = []
+        ev.setIntegerValueField(.scrollWheelEventIsContinuous, value: 0)
+        ev.setIntegerValueField(.eventSourceUserData, value: 0xD0C0A11)
+        ev.post(tap: .cghidEventTap)
+    }
+
+    private func recordTapEvent(_ type: CGEventType) {
+        guard diagnosticsCaptureActive else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            tapEventsSeen += 1
+            lastTapEventAt = Date()
+            lastTapEventType = String(describing: type)
+            switch type {
+            case .leftMouseDown:
+                tapClicksSeen += 1
+            case .scrollWheel:
+                tapScrollsSeen += 1
+            default:
+                break
+            }
+        }
+    }
+
+    func runDiagnosticsCapture(seconds: TimeInterval = 5.0) {
+        tapEventsSeen = 0
+        tapClicksSeen = 0
+        tapScrollsSeen = 0
+        lastTapEventAt = nil
+        lastTapEventType = nil
+        lastDockBundleHit = nil
+        lastDockBundleHitAt = nil
+        diagnosticsCaptureActive = true
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            self?.diagnosticsCaptureActive = false
+        }
+    }
+
     func restart() {
         stop()
-        if AXIsProcessTrusted() {
-            accessibilityGranted = true
+        refreshPermissionsAndSecurityState()
+
+        if accessibilityGranted && inputMonitoringGranted {
             startIfPossible()
         } else {
-            accessibilityGranted = false
-            requestAccessibilityPermission()
+            if !accessibilityGranted {
+                requestAccessibilityPermission()
+            }
+            if !inputMonitoringGranted {
+                requestInputMonitoringPermission()
+            }
             startWhenPermissionAvailable()
         }
         Logger.log("Restart requested. Accessibility granted: \(accessibilityGranted)")
@@ -78,11 +722,18 @@ final class DockExposeCoordinator: ObservableObject {
         if isEnabled {
             stop()
         } else {
-            if AXIsProcessTrusted() {
-                accessibilityGranted = true
+            refreshPermissionsAndSecurityState()
+
+            if !accessibilityGranted {
+                requestAccessibilityPermission()
+            }
+            if !inputMonitoringGranted {
+                requestInputMonitoringPermission()
+            }
+
+            if accessibilityGranted && inputMonitoringGranted {
                 startIfPossible()
             } else {
-                requestAccessibilityPermission()
                 startWhenPermissionAvailable()
             }
         }
@@ -93,6 +744,12 @@ final class DockExposeCoordinator: ObservableObject {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
         Logger.log("Requested accessibility permission prompt.")
+    }
+
+    func requestInputMonitoringPermission() {
+        let granted = CGRequestListenEventAccess()
+        refreshPermissionsAndSecurityState()
+        Logger.log("Requested input monitoring permission prompt. grantedNow=\(granted), preflight=\(inputMonitoringGranted)")
     }
 
     func startWhenPermissionAvailable(pollInterval: TimeInterval = 1.5) {
@@ -106,22 +763,33 @@ final class DockExposeCoordinator: ObservableObject {
 
     @objc private func handlePermissionPoll(_ timer: Timer) {
         let trusted = AXIsProcessTrusted()
+        let input = CGPreflightListenEventAccess()
         accessibilityGranted = trusted
-        if trusted {
+        inputMonitoringGranted = input
+        secureEventInputEnabled = SecureEventInput.isEnabled()
+        if trusted && input {
             timer.invalidate()
             permissionPollTimer = nil
             startIfPossible()
             Logger.log("Accessibility granted detected via polling; started tap.")
         } else {
-            Logger.log("Accessibility still not granted; polling continues.")
+            Logger.log("Permissions still not granted (accessibility=\(trusted), input=\(input)); polling continues.")
         }
     }
 
     private func handleClick(at location: CGPoint, buttonNumber: Int, flags: CGEventFlags) -> Bool {
-        Logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        Logger.log("WORKFLOW: Click received at \(location.x), \(location.y) button \(buttonNumber)")
+        if selfTestActive {
+            if let bundle = DockHitTest.bundleIdentifierAtPoint(location) {
+                lastDockBundleHit = bundle
+                lastDockBundleHitAt = Date()
+                return true
+            }
+            return true
+        }
+
+        Logger.debug("WORKFLOW: Click received at \(location.x), \(location.y) button \(buttonNumber)")
         guard buttonNumber == 0 else {
-            Logger.log("WORKFLOW: Non-primary mouse button \(buttonNumber) - allowing through")
+            Logger.debug("WORKFLOW: Non-primary mouse button \(buttonNumber) - allowing through")
             return false
         }
         
@@ -129,17 +797,21 @@ final class DockExposeCoordinator: ObservableObject {
         let frontmostBefore = FrontmostAppTracker.frontmostBundleIdentifier()
         guard let clickedBundle = DockHitTest.bundleIdentifierAtPoint(location) else {
             // Not a Dock icon - let it pass through immediately
-            Logger.log("WORKFLOW: Not a Dock icon, allowing through")
             return false
         }
+
+        if diagnosticsCaptureActive {
+            lastDockBundleHit = clickedBundle
+            lastDockBundleHitAt = Date()
+        }
         
-        Logger.log("WORKFLOW: frontmost=\(frontmostBefore ?? "nil"), clicked=\(clickedBundle), lastTriggered=\(lastTriggeredBundle ?? "nil"), currentExpose=\(currentExposeApp ?? "nil")")
+        Logger.debug("WORKFLOW: frontmost=\(frontmostBefore ?? "nil"), clicked=\(clickedBundle), lastTriggered=\(lastTriggeredBundle ?? "nil"), currentExpose=\(currentExposeApp ?? "nil")")
         
         // Check if app is running - if not, handle launch in App Exposé
         let isRunning = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == clickedBundle }
         if !isRunning && lastTriggeredBundle != nil {
             // App Exposé is active and user clicked an app that isn't running - launch it
-            Logger.log("WORKFLOW: App Exposé active, clicked app \(clickedBundle) is not running - launching and deactivating App Exposé")
+            Logger.debug("WORKFLOW: App Exposé active, clicked app \(clickedBundle) is not running - launching and deactivating App Exposé")
             lastTriggeredBundle = nil
             currentExposeApp = nil
             appsWithoutWindowsInExpose.removeAll()
@@ -153,7 +825,7 @@ final class DockExposeCoordinator: ObservableObject {
             // Check if this app has no windows (was clicked before without windows)
             if appsWithoutWindowsInExpose.contains(clickedBundle) {
                 // Second click on app without windows - activate and show main window
-                Logger.log("WORKFLOW: Second click on app without windows (\(clickedBundle)) - activating and showing main window")
+                Logger.debug("WORKFLOW: Second click on app without windows (\(clickedBundle)) - activating and showing main window")
                 appsWithoutWindowsInExpose.remove(clickedBundle)
                 lastTriggeredBundle = nil
                 currentExposeApp = nil
@@ -162,7 +834,7 @@ final class DockExposeCoordinator: ObservableObject {
             }
             
             // User clicked the app whose windows are currently shown in App Exposé - deactivate and switch to this app
-            Logger.log("WORKFLOW: STEP 4 - Deactivate click on currentExposeApp (\(clickedBundle)), activating immediately")
+            Logger.debug("WORKFLOW: Deactivate click on currentExposeApp (\(clickedBundle)), activating immediately")
             
             // Clear tracking
             lastTriggeredBundle = nil
@@ -180,23 +852,23 @@ final class DockExposeCoordinator: ObservableObject {
         if frontmostBefore != clickedBundle {
             if lastTriggeredBundle != nil {
                 // App Exposé is active - user clicked a different app icon to show its windows
-                Logger.log("WORKFLOW: App Exposé active - user clicked different app (\(clickedBundle)) to show its windows")
+                Logger.debug("WORKFLOW: App Exposé active - user clicked different app (\(clickedBundle)) to show its windows")
                 
                 // Check if this app has windows
                 if !WindowManager.hasVisibleWindows(bundleIdentifier: clickedBundle) {
-                    Logger.log("WORKFLOW: App \(clickedBundle) has no visible windows - tracking for potential second click")
+                    Logger.debug("WORKFLOW: App \(clickedBundle) has no visible windows - tracking for potential second click")
                     appsWithoutWindowsInExpose.insert(clickedBundle)
                 } else {
                     appsWithoutWindowsInExpose.remove(clickedBundle)
                 }
                 
                 currentExposeApp = clickedBundle
-                Logger.log("WORKFLOW: Updated currentExposeApp=\(clickedBundle)")
+                Logger.debug("WORKFLOW: Updated currentExposeApp=\(clickedBundle)")
                 // Let the event pass through so App Exposé shows this app's windows
                 return false
             } else {
                 // Normal case: different app clicked, no App Exposé active
-                Logger.log("WORKFLOW: STEP 1 - Different app clicked (first activation), allowing Dock activation")
+                Logger.debug("WORKFLOW: Different app clicked (allowing Dock activation)")
                 currentExposeApp = nil
                 appsWithoutWindowsInExpose.removeAll()
                 return false
@@ -206,7 +878,7 @@ final class DockExposeCoordinator: ObservableObject {
         // Same app clicked - check if we just triggered Exposé for this app (original trigger app)
         if let lastBundle = lastTriggeredBundle, lastBundle == clickedBundle {
             // User clicked the original app that triggered Exposé - deactivate and stay on that app
-            Logger.log("WORKFLOW: STEP 4 - Deactivate click on original trigger app (\(clickedBundle)), staying on this app")
+            Logger.debug("WORKFLOW: Deactivate click on original trigger app (\(clickedBundle)), staying on this app")
             lastTriggeredBundle = nil
             currentExposeApp = nil
             appsWithoutWindowsInExpose.removeAll()
@@ -217,6 +889,10 @@ final class DockExposeCoordinator: ObservableObject {
         // Execute the configured click action (with modifier-based overrides)
         let baseAction = preferences.clickAction
         let action = resolvedAction(for: baseAction, flags: flags)
+        lastActionExecuted = action
+        lastActionExecutedBundle = clickedBundle
+        lastActionExecutedSource = "click"
+        lastActionExecutedAt = Date()
         Logger.log("WORKFLOW: Executing click action (button \(buttonNumber)): \(action.rawValue) for \(clickedBundle) (base=\(baseAction.rawValue), flags=\(flags.rawValue))")
         
         switch action {
@@ -251,12 +927,12 @@ final class DockExposeCoordinator: ObservableObject {
             appsWithoutWindowsInExpose.removeAll()
             return true
         case .appExpose:
-            Logger.log("WORKFLOW: STEP 2 - App Exposé trigger from click, processing (fast path)...")
+            Logger.debug("WORKFLOW: App Exposé trigger from click")
             triggerAppExpose(for: clickedBundle)
             return true // Consume event
         case .minimizeAll:
             if shouldThrottleMinimize(bundleIdentifier: clickedBundle) {
-                Logger.log("WORKFLOW: Minimize throttle active for \(clickedBundle); ignoring click")
+                Logger.debug("WORKFLOW: Minimize throttle active for \(clickedBundle); ignoring click")
                 return true
             }
             markMinimize(bundleIdentifier: clickedBundle)
@@ -277,13 +953,25 @@ final class DockExposeCoordinator: ObservableObject {
     }
     
     private func handleScroll(at location: CGPoint, direction: ScrollDirection, flags: CGEventFlags) -> Bool {
-        Logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        Logger.log("WORKFLOW: Scroll \(direction == .up ? "up" : "down") received at \(location.x), \(location.y)")
+        if selfTestActive {
+            if let bundle = DockHitTest.bundleIdentifierAtPoint(location) {
+                lastDockBundleHit = bundle
+                lastDockBundleHitAt = Date()
+                return true
+            }
+            return true
+        }
+
+        Logger.debug("WORKFLOW: Scroll \(direction == .up ? "up" : "down") received at \(location.x), \(location.y)")
         
         guard let clickedBundle = DockHitTest.bundleIdentifierAtPoint(location) else {
             // Not a Dock icon - let it pass through immediately
-            Logger.log("WORKFLOW: Not a Dock icon, allowing through")
             return false
+        }
+
+        if diagnosticsCaptureActive {
+            lastDockBundleHit = clickedBundle
+            lastDockBundleHitAt = Date()
         }
         
         // Debounce rapid successive scroll events for the same bundle/direction (momentum scrolling)
@@ -295,7 +983,7 @@ final class DockExposeCoordinator: ObservableObject {
            lastBundle == clickedBundle,
            lastDir == direction,
            now - lastTime < debounceWindow {
-            Logger.log("WORKFLOW: Scroll debounced for \(clickedBundle) direction \(direction == .up ? "up" : "down") (Δ \(now - lastTime))")
+            Logger.debug("WORKFLOW: Scroll debounced for \(clickedBundle) direction \(direction == .up ? "up" : "down") (Δ \(now - lastTime))")
             return true // consume to avoid Dock repeat behavior
         }
         lastScrollTime = now
@@ -304,7 +992,7 @@ final class DockExposeCoordinator: ObservableObject {
         
         // If App Exposé is active for this app, allow scroll up to close it
         if direction == .up, let current = currentExposeApp, current == clickedBundle, lastTriggeredBundle != nil {
-            Logger.log("WORKFLOW: Scroll up detected while App Exposé active for \(clickedBundle) - exiting")
+            Logger.debug("WORKFLOW: Scroll up detected while App Exposé active for \(clickedBundle) - exiting")
             exitAppExpose()
             return true
         }
@@ -312,6 +1000,10 @@ final class DockExposeCoordinator: ObservableObject {
         // Scroll actions work regardless of if app is active
         let baseAction = direction == .up ? preferences.scrollUpAction : preferences.scrollDownAction
         let action = resolvedAction(for: baseAction, flags: flags)
+        lastActionExecuted = action
+        lastActionExecutedBundle = clickedBundle
+        lastActionExecutedSource = direction == .up ? "scrollUp" : "scrollDown"
+        lastActionExecutedAt = Date()
         Logger.log("WORKFLOW: Executing scroll \(direction == .up ? "up" : "down") action: \(action.rawValue) for \(clickedBundle) (base=\(baseAction.rawValue), flags=\(flags.rawValue))")
         
         switch action {
@@ -351,7 +1043,7 @@ final class DockExposeCoordinator: ObservableObject {
             return true // Consume event
         case .minimizeAll:
             if shouldThrottleMinimize(bundleIdentifier: clickedBundle) {
-                Logger.log("WORKFLOW: Minimize throttle active for \(clickedBundle); ignoring scroll")
+                Logger.debug("WORKFLOW: Minimize throttle active for \(clickedBundle); ignoring scroll")
                 return true
             }
             markMinimize(bundleIdentifier: clickedBundle)
@@ -417,26 +1109,14 @@ final class DockExposeCoordinator: ObservableObject {
     }
     
     private func triggerAppExpose(for bundleIdentifier: String) {
-        Logger.log("WORKFLOW: Triggering App Exposé for \(bundleIdentifier)")
+        Logger.debug("WORKFLOW: Triggering App Exposé for \(bundleIdentifier)")
         
-        // Activate the app first if it's not frontmost; use both NSRunningApplication and AppleScript as belt-and-suspenders.
+        // Activate the app first if it's not frontmost.
         let frontmost = FrontmostAppTracker.frontmostBundleIdentifier()
         let needsActivation = frontmost != bundleIdentifier
         if needsActivation {
             if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleIdentifier }) {
                 _ = app.activate(options: [.activateIgnoringOtherApps])
-            }
-            let script = """
-                tell application id "\(bundleIdentifier)"
-                    activate
-                end tell
-            """
-            var error: NSDictionary?
-            if let appleScript = NSAppleScript(source: script) {
-                appleScript.executeAndReturnError(&error)
-                if let error {
-                    Logger.log("WORKFLOW: AppleScript activate for \(bundleIdentifier) error: \(error)")
-                }
             }
         }
         
@@ -446,21 +1126,23 @@ final class DockExposeCoordinator: ObservableObject {
                 invoker.invokeApplicationWindows(for: bundleIdentifier)
                 lastTriggeredBundle = bundleIdentifier
                 currentExposeApp = bundleIdentifier
-                Logger.log("WORKFLOW: App Exposé triggered for \(bundleIdentifier) (frontmost=\(FrontmostAppTracker.frontmostBundleIdentifier() ?? "nil"))")
+                Logger.debug("WORKFLOW: App Exposé triggered for \(bundleIdentifier) (frontmost=\(FrontmostAppTracker.frontmostBundleIdentifier() ?? "nil"))")
             }
         }
         
-        // Immediate fire for responsiveness
+        // Immediate fire for responsiveness.
         fire()
-        
-        // If activation was needed, schedule a quick retry to ensure the correct app shows after activation completes.
+
+        // If activation was needed, schedule a few quick retries to ride out activation latency.
         if needsActivation {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: fire)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: fire)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16, execute: fire)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28, execute: fire)
         }
     }
     
     private func exitAppExpose() {
-        Logger.log("WORKFLOW: Exiting App Exposé via Escape")
+        Logger.debug("WORKFLOW: Exiting App Exposé via Escape")
         // Send Escape key to close App Exposé
         if let source = CGEventSource(stateID: .combinedSessionState) {
             let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 53, keyDown: true)
@@ -475,65 +1157,45 @@ final class DockExposeCoordinator: ObservableObject {
     
     private func activateApp(bundleIdentifier: String) {
         let beforeActivate = FrontmostAppTracker.frontmostBundleIdentifier()
-        Logger.log("WORKFLOW: Activating app \(bundleIdentifier) after App Exposé closed")
-        Logger.log("WORKFLOW: Frontmost before activation: \(beforeActivate ?? "nil")")
+        Logger.debug("WORKFLOW: Activating app \(bundleIdentifier) after App Exposé closed")
+        Logger.debug("WORKFLOW: Frontmost before activation: \(beforeActivate ?? "nil")")
         
         // Try multiple activation methods for reliability
         if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleIdentifier }) {
-            Logger.log("WORKFLOW: Found running app \(bundleIdentifier), attempting activation")
+            Logger.debug("WORKFLOW: Found running app \(bundleIdentifier), attempting activation")
             
             // Method 1: Try NSRunningApplication.activate()
             let success1 = app.activate(options: [.activateIgnoringOtherApps])
-            Logger.log("WORKFLOW: NSRunningApplication.activate() returned: \(success1)")
-            
-            // Method 2: If that failed, try using AppleScript (more reliable)
-            if !success1 {
-                Logger.log("WORKFLOW: Trying AppleScript activation as fallback")
-                let script = """
-                    tell application id "\(bundleIdentifier)"
-                        activate
-                    end tell
-                """
-                var error: NSDictionary?
-                if let appleScript = NSAppleScript(source: script) {
-                    _ = appleScript.executeAndReturnError(&error)
-                    if error != nil {
-                        Logger.log("WORKFLOW: AppleScript activation failed: \(error?.description ?? "unknown error")")
-                    } else {
-                        Logger.log("WORKFLOW: AppleScript activation succeeded")
-                    }
-                }
-            }
+            Logger.debug("WORKFLOW: NSRunningApplication.activate() returned: \(success1)")
             
             // Check frontmost app after a brief moment to see if activation worked
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 let afterActivate = FrontmostAppTracker.frontmostBundleIdentifier()
-                Logger.log("WORKFLOW: Frontmost after activation (0.1s): \(afterActivate ?? "nil")")
+                Logger.debug("WORKFLOW: Frontmost after activation (0.1s): \(afterActivate ?? "nil")")
                 if afterActivate != bundleIdentifier {
-                    Logger.log("WORKFLOW: WARNING - Expected \(bundleIdentifier) but got \(afterActivate ?? "nil")")
+                    Logger.debug("WORKFLOW: WARNING - Expected \(bundleIdentifier) but got \(afterActivate ?? "nil")")
                 } else {
-                    Logger.log("WORKFLOW: SUCCESS - App \(bundleIdentifier) is now frontmost")
+                    Logger.debug("WORKFLOW: SUCCESS - App \(bundleIdentifier) is now frontmost")
                 }
             }
         } else {
-            Logger.log("WORKFLOW: App \(bundleIdentifier) is not running, cannot activate")
+            Logger.debug("WORKFLOW: App \(bundleIdentifier) is not running, cannot activate")
         }
     }
     
     private func launchApp(bundleIdentifier: String) {
-        Logger.log("WORKFLOW: Launching app \(bundleIdentifier)")
+        Logger.debug("WORKFLOW: Launching app \(bundleIdentifier)")
         let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
         if let url = url {
             NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { app, error in
                 if let error = error {
-                    Logger.log("WORKFLOW: Failed to launch app \(bundleIdentifier): \(error.localizedDescription)")
+                    Logger.debug("WORKFLOW: Failed to launch app \(bundleIdentifier): \(error.localizedDescription)")
                 } else {
-                    Logger.log("WORKFLOW: Successfully launched app \(bundleIdentifier)")
+                    Logger.debug("WORKFLOW: Successfully launched app \(bundleIdentifier)")
                 }
             }
         } else {
-            Logger.log("WORKFLOW: Could not find app URL for \(bundleIdentifier)")
+            Logger.debug("WORKFLOW: Could not find app URL for \(bundleIdentifier)")
         }
     }
 }
-

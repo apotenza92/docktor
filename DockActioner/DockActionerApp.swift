@@ -17,7 +17,6 @@ struct DockActionerApp: App {
         }
         .defaultSize(width: 420, height: 520)
         .windowResizability(.contentSize)
-        .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unifiedCompact)
     }
 }

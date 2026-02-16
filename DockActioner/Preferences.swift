@@ -30,7 +30,8 @@ final class Preferences: ObservableObject {
     private let clickActionKey = "clickAction"
     private let scrollUpActionKey = "scrollUpAction"
     private let scrollDownActionKey = "scrollDownAction"
-    private let scrollDefaultsMigratedKey = "scrollDefaultsMigrated_v2"
+    private let scrollDefaultsMigratedKey = "scrollDefaultsMigrated_v3"
+    private let behaviorDefaultsMigratedKey = "behaviorDefaultsMigrated_v4"
     private let showOnStartupKey = "showOnStartup"
     private let firstLaunchCompletedKey = "firstLaunchCompleted"
     private let startAtLoginKey = "startAtLogin"
@@ -92,12 +93,12 @@ final class Preferences: ObservableObject {
     
     private init() {
         // Load from UserDefaults or use defaults into locals first
-        let clickAction: DockAction
+        var clickAction: DockAction
         if let clickRaw = userDefaults.string(forKey: clickActionKey),
            let click = DockAction(rawValue: clickRaw) {
             clickAction = click
         } else {
-            clickAction = .hideApp // Default: Hide App
+            clickAction = .appExpose // Default: App Expose
         }
         
         var scrollUpAction: DockAction
@@ -105,7 +106,7 @@ final class Preferences: ObservableObject {
            let scrollUp = DockAction(rawValue: scrollUpRaw) {
             scrollUpAction = scrollUp
         } else {
-            scrollUpAction = .appExpose // Default: App Exposé
+            scrollUpAction = .hideOthers // Default: Hide Others
         }
         
         var scrollDownAction: DockAction
@@ -113,19 +114,46 @@ final class Preferences: ObservableObject {
            let scrollDown = DockAction(rawValue: scrollDownRaw) {
             scrollDownAction = scrollDown
         } else {
-            scrollDownAction = .minimizeAll // Default: Minimize All
+            scrollDownAction = .hideApp // Default: Hide App
         }
-        
-        // One-time migration to flip legacy defaults (minimizeAll up / appExpose down) to new defaults.
+
+        // One-time migration to move older defaults to current defaults.
         let migrated = userDefaults.bool(forKey: scrollDefaultsMigratedKey)
         if !migrated {
+            // Legacy v1: minimizeAll up / appExpose down
             if scrollUpAction == .minimizeAll && scrollDownAction == .appExpose {
-                scrollUpAction = .appExpose
-                scrollDownAction = .minimizeAll
+                scrollUpAction = .hideOthers
+                scrollDownAction = .appExpose
                 userDefaults.set(scrollUpAction.rawValue, forKey: scrollUpActionKey)
                 userDefaults.set(scrollDownAction.rawValue, forKey: scrollDownActionKey)
             }
+
+            // v2 default: appExpose up / minimizeAll down
+            if scrollUpAction == .appExpose && scrollDownAction == .minimizeAll {
+                scrollUpAction = .hideOthers
+                scrollDownAction = .appExpose
+                userDefaults.set(scrollUpAction.rawValue, forKey: scrollUpActionKey)
+                userDefaults.set(scrollDownAction.rawValue, forKey: scrollDownActionKey)
+            }
+
             userDefaults.set(true, forKey: scrollDefaultsMigratedKey)
+        }
+
+        // One-time migration to move prior default behavior to current defaults.
+        let behaviorMigrated = userDefaults.bool(forKey: behaviorDefaultsMigratedKey)
+        if !behaviorMigrated {
+            let looksLikeLegacyDefaults = clickAction == .hideApp
+                && scrollUpAction == .hideOthers
+                && scrollDownAction == .appExpose
+
+            if looksLikeLegacyDefaults {
+                clickAction = .appExpose
+                scrollDownAction = .hideApp
+                userDefaults.set(clickAction.rawValue, forKey: clickActionKey)
+                userDefaults.set(scrollDownAction.rawValue, forKey: scrollDownActionKey)
+            }
+
+            userDefaults.set(true, forKey: behaviorDefaultsMigratedKey)
         }
         
         // General settings defaults
@@ -150,4 +178,3 @@ final class Preferences: ObservableObject {
         self.startAtLogin = startAtLogin
     }
 }
-

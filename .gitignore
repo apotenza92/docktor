@@ -1,1 +1,7 @@
 logs/*
+.DS_Store
+**/*.xcuserdatad/
+**/xcuserdata/
+tools/artifacts/
+.build/
+dist/

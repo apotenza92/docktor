@@ -12,12 +12,41 @@ struct PreferencesView: View {
             actionsSection
             Divider()
             permissionsSection
-            Divider()
-            controlSection
         }
         .padding(14)
         .frame(minWidth: 420, idealWidth: 420)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var shouldShowPermissionsBanner: Bool {
+        !coordinator.accessibilityGranted || !coordinator.inputMonitoringGranted
+    }
+
+    private var permissionsBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Permissions Needed")
+                .font(.headline)
+            Text("DockActioner needs Accessibility and Input Monitoring to detect Dock gestures.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            HStack(spacing: 10) {
+                if !coordinator.accessibilityGranted {
+                    Button("Grant Accessibility", action: openAccessibilitySettings)
+                        .controlSize(.small)
+                }
+                if !coordinator.inputMonitoringGranted {
+                    Button("Grant Input Monitoring", action: openInputMonitoringSettings)
+                        .controlSize(.small)
+                }
+                Spacer()
+            }
+            Text("Tip: when developing, sign the app with a consistent identity (Xcode: Signing & Capabilities -> Team) so macOS doesn't treat each rebuild as a new app.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(10)
+        .background(Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
+        .cornerRadius(8)
     }
     
     private var header: some View {
@@ -35,19 +64,22 @@ struct PreferencesView: View {
     private var permissionsSection: some View {
         sectionBox {
             VStack(alignment: .leading, spacing: 22) {
+                if shouldShowPermissionsBanner {
+                    permissionsBanner
+                }
                 permissionRow(
                     title: "Accessibility",
-                    detail: "Required to detect Dock clicks and scrolls.",
+                    detail: "Required to hit-test Dock icons and control other apps.",
                     granted: coordinator.accessibilityGranted,
                     actionTitle: coordinator.accessibilityGranted ? "Open Accessibility Settings" : "Grant Accessibility",
                     action: openAccessibilitySettings
                 )
                 permissionRow(
-                    title: "Automation (Apple Events)",
-                    detail: "Needed to send the App Exposé shortcut via System Events.",
-                    granted: true,
-                    actionTitle: "Open Automation Settings",
-                    action: openAutomationSettings
+                    title: "Input Monitoring",
+                    detail: "Required for the global event tap (clicks and scrolls).",
+                    granted: coordinator.inputMonitoringGranted,
+                    actionTitle: coordinator.inputMonitoringGranted ? "Open Input Monitoring Settings" : "Grant Input Monitoring",
+                    action: openInputMonitoringSettings
                 )
             }
         }
@@ -87,20 +119,15 @@ struct PreferencesView: View {
     
     private var appSettingsSection: some View {
         sectionBox {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Toggle("Show settings on startup", isOn: $preferences.showOnStartup)
                 Toggle("Start DockActioner at login", isOn: $preferences.startAtLogin)
-            }
-        }
-    }
-    
-    private var controlSection: some View {
-        sectionBox {
-            HStack(spacing: 12) {
-                Button("Restart App", action: restartApp)
-                    .buttonStyle(.bordered)
-                Button("Quit", action: { NSApp.terminate(nil) })
-                    .buttonStyle(.borderedProminent)
+                HStack(spacing: 12) {
+                    Button("Restart App", action: restartApp)
+                        .buttonStyle(.bordered)
+                    Button("Quit", action: { NSApp.terminate(nil) })
+                        .buttonStyle(.borderedProminent)
+                }
             }
         }
     }
@@ -144,6 +171,8 @@ struct PreferencesView: View {
             return "Option: Hide App · Shift: Bring All to Front"
         case .bringAllToFront:
             return "Option: Hide Others · Shift: Hide App"
+        case .appExpose:
+            return "Uses Dock notification trigger"
         default:
             return nil
         }
@@ -156,11 +185,13 @@ struct PreferencesView: View {
         coordinator.requestAccessibilityPermission()
         coordinator.startWhenPermissionAvailable()
     }
-    
-    private func openAutomationSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+
+    private func openInputMonitoringSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
             NSWorkspace.shared.open(url)
         }
+        coordinator.requestInputMonitoringPermission()
+        coordinator.startWhenPermissionAvailable()
     }
     
     private func restartApp() {

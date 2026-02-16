@@ -68,7 +68,6 @@
 				FA12B18E2EFF98EC00DB8333 /* Sources */,
 				FA12B18F2EFF98EC00DB8333 /* Frameworks */,
 				FA12B1902EFF98EC00DB8333 /* Resources */,
-				FA12B1C02F10123400DB8333 /* Stage to Applications */,
 			);
 			buildRules = (
 			);
@@ -129,25 +128,6 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		FA12B1C02F10123400DB8333 /* Stage to Applications */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Stage to Applications";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(PROJECT_DIR)/.stage-to-applications.stamp",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "set -e\nDERIVED_APP=\"${TARGET_BUILD_DIR}/${PRODUCT_NAME}.app\"\nDEST=\"/Applications/${PRODUCT_NAME}.app\"\nSTAMP=\"${PROJECT_DIR}/.stage-to-applications.stamp\"\nif [ -d \"$DERIVED_APP\" ]; then\n  echo \"Removing existing $DEST\"\n  /bin/rm -rf \"$DEST\" || true\n  echo \"Staging $DERIVED_APP -> $DEST\"\n  /usr/bin/ditto \"$DERIVED_APP\" \"$DEST\"\n  echo \"Ad-hoc signing $DEST\"\n  /usr/bin/codesign --force --deep --sign - \"$DEST\"\n  /usr/bin/touch \"$STAMP\"\nelse\n  echo \"Derived app missing: $DERIVED_APP\" >&2\nfi\n";
-		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -298,7 +278,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = pzc.DockActioner;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -320,6 +300,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -330,7 +311,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = pzc.DockActioner;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

@@ -26,26 +26,9 @@ enum WindowManager {
         if AXUIElementSetAttributeValue(appElement, kAXHiddenAttribute as CFString, hidden) == .success {
             Logger.log("WindowManager: AX hide succeeded for \(bundleIdentifier)")
             return true
-        } else {
-            Logger.log("WindowManager: AX hide failed for \(bundleIdentifier); attempting AppleScript")
         }
-        
-        let script = """
-        tell application id "\(bundleIdentifier)"
-            hide
-        end tell
-        """
-        
-        var error: NSDictionary?
-        if let appleScript = NSAppleScript(source: script) {
-            appleScript.executeAndReturnError(&error)
-            if error != nil {
-                Logger.log("WindowManager: Failed to hide app \(bundleIdentifier): \(error?.description ?? "unknown error")")
-                return false
-            }
-            Logger.log("WindowManager: Successfully hid app \(bundleIdentifier)")
-            return true
-        }
+
+        Logger.log("WindowManager: AX hide failed for \(bundleIdentifier)")
         return false
     }
     
@@ -56,15 +39,7 @@ enum WindowManager {
             return false
         }
         app.unhide()
-        let activated = app.activate(options: [.activateIgnoringOtherApps])
-        if !activated {
-            let script = """
-            tell application id "\(bundleIdentifier)"
-                activate
-            end tell
-            """
-            _ = runAppleScript(script, context: "Unhide activate \(bundleIdentifier)")
-        }
+        _ = app.activate(options: [.activateIgnoringOtherApps])
         Logger.log("WindowManager: Unhid and activated \(bundleIdentifier)")
         return true
     }
@@ -149,22 +124,8 @@ enum WindowManager {
         
         guard restoredCount > 0 else { return false }
         
-        // Bring the app to the front; try NSRunningApplication then AppleScript fallback.
-        let activated = app.activate(options: [.activateIgnoringOtherApps])
-        if !activated {
-            let script = """
-            tell application id "\(bundleIdentifier)"
-                activate
-            end tell
-            """
-            var error: NSDictionary?
-            if let appleScript = NSAppleScript(source: script) {
-                appleScript.executeAndReturnError(&error)
-                if let error {
-                    Logger.log("WindowManager: AppleScript activate failed for \(bundleIdentifier): \(error)")
-                }
-            }
-        }
+        // Bring the app to the front.
+        _ = app.activate(options: [.activateIgnoringOtherApps])
         
         // Re-assert frontmost after a short delay to cover race conditions.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -276,23 +237,7 @@ enum WindowManager {
             return false
         }
         
-        let activated = app.activate(options: [.activateIgnoringOtherApps])
-        if !activated {
-            // Try AppleScript as fallback
-            let script = """
-            tell application id "\(bundleIdentifier)"
-                activate
-            end tell
-            """
-            var error: NSDictionary?
-            if let appleScript = NSAppleScript(source: script) {
-                appleScript.executeAndReturnError(&error)
-                if error != nil {
-                    Logger.log("WindowManager: Failed to activate app \(bundleIdentifier)")
-                    return false
-                }
-            }
-        }
+        _ = app.activate(options: [.activateIgnoringOtherApps])
         
         // Wait a moment for app to activate, then show main window
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -348,15 +293,7 @@ enum WindowManager {
             }
         }
         
-        let activated = app.activate(options: [.activateIgnoringOtherApps])
-        if !activated {
-            let script = """
-            tell application id "\(bundleIdentifier)"
-                activate
-            end tell
-            """
-            _ = runAppleScript(script, context: "BringAllToFront activate \(bundleIdentifier)")
-        }
+        _ = app.activate(options: [.activateIgnoringOtherApps])
         
         Logger.log("WindowManager: Raised \(raisedCount) windows for \(bundleIdentifier)")
         return raisedCount > 0
@@ -374,15 +311,31 @@ enum WindowManager {
             app.unhide()
         }
         _ = app.activate(options: [.activateIgnoringOtherApps])
-        
-        let script = """
-        tell application "System Events"
-            keystroke "h" using {command down, option down}
-        end tell
-        """
-        let success = runAppleScript(script, context: "HideOthers")
-        Logger.log("WindowManager: Hide others invoked for \(bundleIdentifier); success=\(success)")
-        return success
+
+        var hiddenCount = 0
+        for other in NSWorkspace.shared.runningApplications {
+            guard other.processIdentifier != app.processIdentifier,
+                  other.activationPolicy == .regular,
+                  !other.isTerminated,
+                  !other.isHidden
+            else {
+                continue
+            }
+
+            if other.hide() {
+                hiddenCount += 1
+                continue
+            }
+
+            let element = AXUIElementCreateApplication(other.processIdentifier)
+            let hidden: CFBoolean = kCFBooleanTrue
+            if AXUIElementSetAttributeValue(element, kAXHiddenAttribute as CFString, hidden) == .success {
+                hiddenCount += 1
+            }
+        }
+
+        Logger.log("WindowManager: Hide others invoked for \(bundleIdentifier); hidden=\(hiddenCount)")
+        return true
     }
     
     /// Show all apps (inverse of Hide Others)
@@ -400,18 +353,9 @@ enum WindowManager {
             Logger.log("WindowManager: Show All - unhid applications")
             return true
         }
-        
-        // Fallback to AppleScript "Show All" in case app states are inconsistent
-        let script = """
-        tell application "System Events"
-            try
-                keystroke "h" using {command down, option down, shift down}
-            end try
-        end tell
-        """
-        let success = runAppleScript(script, context: "ShowAll")
-        Logger.log("WindowManager: Show All fallback via AppleScript; success=\(success)")
-        return success
+
+        Logger.log("WindowManager: Show All - no hidden apps found")
+        return true
     }
     
     /// Check if any other app (excluding the provided bundle) is currently hidden.
@@ -422,19 +366,4 @@ enum WindowManager {
         }
     }
     
-    @discardableResult
-    private static func runAppleScript(_ source: String, context: String) -> Bool {
-        var error: NSDictionary?
-        if let appleScript = NSAppleScript(source: source) {
-            appleScript.executeAndReturnError(&error)
-            if let error {
-                Logger.log("WindowManager: AppleScript error (\(context)): \(error)")
-                return false
-            }
-            return true
-        }
-        Logger.log("WindowManager: AppleScript creation failed (\(context))")
-        return false
-    }
 }
-

@@ -10,16 +10,31 @@ final class DockClickEventTap {
     private var runLoopSource: CFRunLoopSource?
     private var clickHandler: ((CGPoint, Int, CGEventFlags) -> Bool)? // Returns true if event should be consumed
     private var scrollHandler: ((CGPoint, ScrollDirection, CGEventFlags) -> Bool)? // Returns true if event should be consumed
+    private var anyEventHandler: ((CGEventType) -> Void)?
 
-    func start(clickHandler: @escaping (CGPoint, Int, CGEventFlags) -> Bool, scrollHandler: @escaping (CGPoint, ScrollDirection, CGEventFlags) -> Bool) -> Bool {
+    private(set) var lastStartError: String?
+
+    private var continuousScrollActive = false
+    private var continuousScrollConsume = false
+    private var lastContinuousScrollTime: TimeInterval = 0
+    private var consumeLeftMouseUp = false
+
+    func start(
+        clickHandler: @escaping (CGPoint, Int, CGEventFlags) -> Bool,
+        scrollHandler: @escaping (CGPoint, ScrollDirection, CGEventFlags) -> Bool,
+        anyEventHandler: ((CGEventType) -> Void)? = nil
+    ) -> Bool {
         stop()
         self.clickHandler = clickHandler
         self.scrollHandler = scrollHandler
+        self.anyEventHandler = anyEventHandler
+        self.lastStartError = nil
 
         // Capture both mouse clicks and scroll wheel events
-        let clickMask = (1 << CGEventType.leftMouseDown.rawValue)
+        let clickDownMask = (1 << CGEventType.leftMouseDown.rawValue)
+        let clickUpMask = (1 << CGEventType.leftMouseUp.rawValue)
         let scrollMask = (1 << CGEventType.scrollWheel.rawValue)
-        let mask = clickMask | scrollMask
+        let mask = clickDownMask | clickUpMask | scrollMask
         
         Logger.log("Attempting to create event tap.")
         guard let tap = CGEvent.tapCreate(tap: .cghidEventTap,
@@ -28,21 +43,29 @@ final class DockClickEventTap {
                                           eventsOfInterest: CGEventMask(mask),
                                           callback: { _, type, event, refcon in
                                               let coordinator = Unmanaged<DockClickEventTap>.fromOpaque(refcon!).takeUnretainedValue()
-                                              
+
+                                              coordinator.anyEventHandler?(type)
+                                               
                                               var shouldConsume = false
-                                              switch type {
-                                              case .tapDisabledByTimeout, .tapDisabledByUserInput:
-                                                  Logger.log("DockClickEventTap: Tap disabled (\(type == .tapDisabledByTimeout ? "timeout" : "user input")); re-enabling.")
-                                                  if let tapPort = coordinator.eventTap {
-                                                      CGEvent.tapEnable(tap: tapPort, enable: true)
-                                                  }
-                                                  return Unmanaged.passUnretained(event)
-                                              case .leftMouseDown:
-                                                  shouldConsume = coordinator.didReceiveClick(event: event)
-                                              case .scrollWheel:
-                                                  shouldConsume = coordinator.didReceiveScroll(event: event)
-                                              default:
-                                                  break
+                                               switch type {
+                                               case .tapDisabledByTimeout, .tapDisabledByUserInput:
+                                                   Logger.log("DockClickEventTap: Tap disabled (\(type == .tapDisabledByTimeout ? "timeout" : "user input")); re-enabling.")
+                                                   if let tapPort = coordinator.eventTap {
+                                                       CGEvent.tapEnable(tap: tapPort, enable: true)
+                                                   }
+                                                   return Unmanaged.passUnretained(event)
+                                               case .leftMouseDown:
+                                                   shouldConsume = coordinator.didReceiveClick(event: event)
+                                                   if shouldConsume {
+                                                       coordinator.consumeLeftMouseUp = true
+                                                   }
+                                               case .leftMouseUp:
+                                                   shouldConsume = coordinator.consumeLeftMouseUp
+                                                   coordinator.consumeLeftMouseUp = false
+                                               case .scrollWheel:
+                                                   shouldConsume = coordinator.didReceiveScroll(event: event)
+                                               default:
+                                                   break
                                               }
                                               
                                               // Return nil to consume the event, or the event to let it pass through
@@ -50,6 +73,7 @@ final class DockClickEventTap {
                                           },
                                           userInfo: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())) else {
             Logger.log("Failed to create event tap (tapCreate returned nil).")
+            lastStartError = "CGEvent.tapCreate returned nil (missing permission or tap blocked)"
             return false
         }
 
@@ -59,6 +83,8 @@ final class DockClickEventTap {
             CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
             CGEvent.tapEnable(tap: tap, enable: true)
             Logger.log("Event tap run loop source added and enabled.")
+        } else {
+            lastStartError = "Failed to create run loop source for event tap"
         }
         return true
     }
@@ -76,22 +102,25 @@ final class DockClickEventTap {
         eventTap = nil
         clickHandler = nil
         scrollHandler = nil
+        anyEventHandler = nil
+        continuousScrollActive = false
+        continuousScrollConsume = false
+        lastContinuousScrollTime = 0
+        consumeLeftMouseUp = false
     }
 
     private func didReceiveClick(event: CGEvent) -> Bool {
         let location = event.location
         let buttonNumber = Int(event.getIntegerValueField(.mouseEventButtonNumber))
-        let timestamp = event.timestamp
         let flags = event.flags
-        Logger.log("DockClickEventTap: Raw click event received at \(location.x), \(location.y) (timestamp: \(timestamp), button: \(buttonNumber))")
+        Logger.debug("DockClickEventTap: Raw click at \(location.x), \(location.y) (button: \(buttonNumber))")
         let shouldConsume = clickHandler?(location, buttonNumber, flags) ?? false
-        Logger.log("DockClickEventTap: Click handler called for click at \(location.x), \(location.y), button: \(buttonNumber), flags: \(flags.rawValue), consume: \(shouldConsume)")
+        Logger.debug("DockClickEventTap: Click consume=\(shouldConsume)")
         return shouldConsume
     }
     
     private func didReceiveScroll(event: CGEvent) -> Bool {
         let location = event.location
-        let timestamp = event.timestamp
         let flags = event.flags
         
         // Use the first non-zero delta we can get, preferring point deltas for sensitivity.
@@ -99,21 +128,57 @@ final class DockClickEventTap {
         let fixedDelta = event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1) / 256.0 // convert 16.16 fixed to float
         let coarseDelta = event.getDoubleValueField(.scrollWheelEventDeltaAxis1) // wheel notch count
         let delta = [pointDelta, fixedDelta, coarseDelta].first(where: { $0 != 0 }) ?? 0
+
+        let isContinuous = event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
+        let scrollPhase = Int(event.getIntegerValueField(.scrollWheelEventScrollPhase))
+        let momentumPhase = Int(event.getIntegerValueField(.scrollWheelEventMomentumPhase))
+
+        if isContinuous {
+            // Collapse trackpad/magic mouse scroll into a single logical gesture for action triggers.
+            // We still decide whether to consume the whole gesture based on the first eligible event.
+            let now = ProcessInfo.processInfo.systemUptime
+            let resetAfterSilence: TimeInterval = 0.25
+            if continuousScrollActive, now - lastContinuousScrollTime > resetAfterSilence {
+                continuousScrollActive = false
+                continuousScrollConsume = false
+            }
+            lastContinuousScrollTime = now
+
+            // New gesture start hint.
+            let beganMask = 1 | 16 // began | mayBegin
+            if (scrollPhase & beganMask) != 0 {
+                continuousScrollActive = false
+                continuousScrollConsume = false
+            }
+
+            // Ignore momentum-only sequences when we didn't start consuming.
+            if !continuousScrollActive, momentumPhase != 0 {
+                return false
+            }
+
+            if continuousScrollActive {
+                return continuousScrollConsume
+            }
+        }
         
         // Require a small threshold so accidental micro-movements are ignored, but single notches still count.
         let threshold = 0.2
         if abs(delta) < threshold {
-            Logger.log("DockClickEventTap: Scroll delta below threshold (\(delta)); ignoring")
-            return false
+            Logger.debug("DockClickEventTap: Scroll delta below threshold (\(delta)); ignoring")
+            return isContinuous ? continuousScrollConsume : false
         }
         
-        // Treat positive deltas as scroll down to align with trackpad “natural” scrolling and observed behavior.
+        // Treat positive deltas as scroll down to align with trackpad "natural" scrolling and observed behavior.
         let direction: ScrollDirection = delta > 0 ? .down : .up
-        
-        Logger.log("DockClickEventTap: Raw scroll event received at \(location.x), \(location.y) (timestamp: \(timestamp), delta: \(delta), direction: \(direction == .up ? "up" : "down"))")
+
+        Logger.debug("DockClickEventTap: Raw scroll at \(location.x), \(location.y) (delta: \(delta), dir: \(direction == .up ? "up" : "down"), continuous: \(isContinuous))")
         let shouldConsume = scrollHandler?(location, direction, flags) ?? false
-        Logger.log("DockClickEventTap: Scroll handler called for scroll at \(location.x), \(location.y), direction: \(direction == .up ? "up" : "down"), flags: \(flags.rawValue), consume: \(shouldConsume)")
+        Logger.debug("DockClickEventTap: Scroll consume=\(shouldConsume)")
+
+        if isContinuous {
+            continuousScrollActive = true
+            continuousScrollConsume = shouldConsume
+        }
         return shouldConsume
     }
 }
-

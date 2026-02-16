@@ -12,13 +12,13 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>LSUIElement</key>
-	<false/>
+	<true/>
 	<key>NSAccessibilityUsageDescription</key>
-	<string>DockActioner needs Accessibility access to detect Dock clicks and trigger App Exposé.</string>
-	<key>NSAppleEventsUsageDescription</key>
-	<string>DockActioner uses AppleScript to send the App Exposé shortcut via System Events.</string>
+	<string>DockActioner needs Accessibility access to detect Dock gestures and manage app windows.</string>
 </dict>
 </plist>

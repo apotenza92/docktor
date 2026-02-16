@@ -1,0 +1,303 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (example: v1.0.0 or v1.0.0-beta.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      version_core: ${{ steps.meta.outputs.version_core }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      build_number: ${{ steps.meta.outputs.build_number }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse tag metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            VERSION="${BASH_REMATCH[1]}"
+            CORE_VERSION="$VERSION"
+            PRERELEASE="false"
+          elif [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-([0-9A-Za-z.-]+)$ ]]; then
+            VERSION="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}"
+            CORE_VERSION="${BASH_REMATCH[1]}"
+            PRERELEASE="true"
+          else
+            echo "::error::Tag must match vX.Y.Z or vX.Y.Z-<prerelease>"
+            exit 1
+          fi
+
+          PROJECT_VERSION="$(python3 -c 'import re, pathlib; text = pathlib.Path("DockActioner.xcodeproj/project.pbxproj").read_text(encoding="utf-8"); m = re.search(r"MARKETING_VERSION = ([0-9]+\.[0-9]+\.[0-9]+);", text); print(m.group(1) if m else "")')"
+
+          if [[ "$PROJECT_VERSION" != "$CORE_VERSION" ]]; then
+            echo "::error::Tag core version ($CORE_VERSION) must match MARKETING_VERSION ($PROJECT_VERSION)."
+            exit 1
+          fi
+
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_core=$CORE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Verify changelog entry exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release_notes_from_changelog.py --tag "${{ steps.meta.outputs.tag }}" > /dev/null
+
+  build-macos:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+          - runner: macos-13
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Import signing certificate
+        shell: bash
+        env:
+          APPLE_SIGNING_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_SIGNING_CERTIFICATE_P12_BASE64 }}
+          APPLE_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          test -n "$APPLE_SIGNING_CERTIFICATE_P12_BASE64"
+          test -n "$APPLE_SIGNING_CERTIFICATE_PASSWORD"
+
+          CERT_PATH="$RUNNER_TEMP/dockactioner-signing.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/dockactioner.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+
+          python3 -c 'import base64, pathlib, sys; pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(sys.argv[2]))' "$CERT_PATH" "$APPLE_SIGNING_CERTIFICATE_P12_BASE64"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_SIGNING_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Build signed app archive
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          VERSION_CORE: ${{ needs.prepare.outputs.version_core }}
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+        run: |
+          set -euo pipefail
+
+          test -n "$APPLE_SIGNING_IDENTITY"
+          test -n "$APPLE_TEAM_ID"
+
+          ARCHIVE_PATH="$RUNNER_TEMP/DockActioner-${{ matrix.arch }}.xcarchive"
+
+          xcodebuild \
+            -project DockActioner.xcodeproj \
+            -scheme DockActioner \
+            -configuration Release \
+            -destination "generic/platform=macOS" \
+            -archivePath "$ARCHIVE_PATH" \
+            archive \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$APPLE_SIGNING_IDENTITY" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            MARKETING_VERSION="$VERSION_CORE" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+
+          APP_PATH="$ARCHIVE_PATH/Products/Applications/DockActioner.app"
+          if [[ ! -d "$APP_PATH" ]]; then
+            echo "::error::Expected app bundle not found at $APP_PATH"
+            exit 1
+          fi
+
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+          mkdir -p dist
+          cp -R "$APP_PATH" "dist/DockActioner.app"
+
+      - name: Notarize and staple with notarytool
+        shell: bash
+        env:
+          APPLE_NOTARYTOOL_KEY_ID: ${{ secrets.APPLE_NOTARYTOOL_KEY_ID }}
+          APPLE_NOTARYTOOL_ISSUER_ID: ${{ secrets.APPLE_NOTARYTOOL_ISSUER_ID }}
+          APPLE_NOTARYTOOL_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARYTOOL_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+
+          test -n "$APPLE_NOTARYTOOL_KEY_ID"
+          test -n "$APPLE_NOTARYTOOL_ISSUER_ID"
+          test -n "$APPLE_NOTARYTOOL_KEY_P8_BASE64"
+
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_NOTARYTOOL_KEY_ID}.p8"
+          python3 -c 'import base64, pathlib, sys; pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(sys.argv[2]))' "$KEY_PATH" "$APPLE_NOTARYTOOL_KEY_P8_BASE64"
+
+          APP_PATH="dist/DockActioner.app"
+          UPLOAD_ZIP="$RUNNER_TEMP/notary-upload.zip"
+
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$UPLOAD_ZIP"
+
+          xcrun notarytool submit "$UPLOAD_ZIP" \
+            --key "$KEY_PATH" \
+            --key-id "$APPLE_NOTARYTOOL_KEY_ID" \
+            --issuer "$APPLE_NOTARYTOOL_ISSUER_ID" \
+            --wait
+
+          xcrun stapler staple -v "$APP_PATH"
+
+      - name: Package release zip
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p out
+          PACKAGE="DockActioner-v${VERSION}-macos-${{ matrix.arch }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "dist/DockActioner.app" "out/$PACKAGE"
+          ls -lah out
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: out/*
+          if-no-files-found: error
+
+  publish-release:
+    needs:
+      - prepare
+      - build-macos
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-macos-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          python3 scripts/release_notes_from_changelog.py --tag "$TAG" > "$NOTES_FILE"
+
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file "$NOTES_FILE" --repo "$GH_REPO"
+            gh release upload "$TAG" dist/* --clobber --repo "$GH_REPO"
+            exit 0
+          fi
+
+          if [[ "$PRERELEASE" == "true" ]]; then
+            gh release create "$TAG" dist/* --title "$TAG" --notes-file "$NOTES_FILE" --prerelease --repo "$GH_REPO"
+          else
+            gh release create "$TAG" dist/* --title "$TAG" --notes-file "$NOTES_FILE" --repo "$GH_REPO"
+          fi
+
+  update-homebrew-tap:
+    needs:
+      - prepare
+      - publish-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Homebrew tap token
+        id: tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          if [[ -n "${HOMEBREW_TAP_TOKEN:-}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "HOMEBREW_TAP_TOKEN not set; skipping tap update."
+          fi
+
+      - name: Checkout DockActioner
+        if: ${{ steps.tap.outputs.enabled == 'true' }}
+        uses: actions/checkout@v4
+
+      - name: Clone homebrew tap
+        if: ${{ steps.tap.outputs.enabled == 'true' }}
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/apotenza92/homebrew-tap.git" /tmp/homebrew-tap
+
+      - name: Update DockActioner casks
+        if: ${{ steps.tap.outputs.enabled == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release/update_homebrew_tap_casks.py --tap-path /tmp/homebrew-tap --repo apotenza92/dock-actioner
+
+      - name: Commit and push tap updates
+        if: ${{ steps.tap.outputs.enabled == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/homebrew-tap
+
+          if git diff --quiet -- Casks/dock-actioner.rb Casks/dock-actioner@beta.rb; then
+            echo "No Homebrew cask changes to push."
+            exit 0
+          fi
+
+          git config user.name "dockactioner-release-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add Casks/dock-actioner.rb Casks/dock-actioner@beta.rb
+          git commit -m "Update DockActioner casks from release metadata"
+          git push origin main

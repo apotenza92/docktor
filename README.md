@@ -1,99 +1,154 @@
 # DockActioner
 
-A macOS application that enhances your Dock with customizable click and scroll gestures for app management.
+DockActioner is a lightweight macOS menu bar app that adds gesture actions to Dock icons.
+
+- Click action defaults to **App Expose**.
+- Scroll down defaults to **Hide App**.
+- Scroll up defaults to **Minimize All**.
 
 ## Features
 
-- **Click Actions**: Customize what happens when you click an active app's Dock icon
-- **Scroll Gestures**: Customize scroll up and scroll down actions on any Dock icon
-- **App Exposé Integration**: Trigger App Exposé via gestures
-- **Window Management**: Hide, minimize, or expose windows with simple gestures
+- Click active Dock app to trigger configurable window actions.
+- Scroll over any Dock icon for quick app/window management.
+- App Expose trigger uses Dock notification (`com.apple.expose.front.awake`) for reliability.
+- Starts at login (optional) and runs as a menu bar utility.
 
-## Installation
+## Install
 
-1. Build the project in Xcode or download a pre-built release
-2. Copy `DockActioner.app` to `/Applications`
-3. Launch the app
-4. Grant required permissions when prompted
+### Homebrew (recommended)
+
+```bash
+brew tap apotenza92/tap
+brew install --cask apotenza92/tap/dock-actioner
+```
+
+Beta channel:
+
+```bash
+brew install --cask apotenza92/tap/dock-actioner@beta
+```
+
+### Manual
+
+1. Download the latest release zip from GitHub Releases.
+2. Move `DockActioner.app` to `/Applications`.
+3. Launch once and grant required permissions.
 
 ## Permissions
 
-DockActioner requires two permissions:
+DockActioner requires:
 
-### 1. Accessibility Permission
-**Required** - Allows the app to detect clicks and scrolls on Dock icons.
+1. **Accessibility** - for Dock hit-testing and app/window actions.
+2. **Input Monitoring** - for global click/scroll event taps.
 
-To grant:
-1. System Settings > Privacy & Security > Accessibility
-2. Enable DockActioner
+Open from macOS System Settings:
 
-### 2. Automation Permission
-**Required** - Allows the app to trigger App Exposé and manage windows.
-
-To grant:
-1. System Settings > Privacy & Security > Automation
-2. Enable DockActioner for System Events
+- `Privacy & Security > Accessibility`
+- `Privacy & Security > Input Monitoring`
 
 ## Usage
 
-### Click Actions
-Click actions only work when the app is **active** (frontmost):
+Open **Preferences** from the menu bar icon.
 
-- **Hide App** (default): Hides all windows of the active app (Cmd+H equivalent)
-- **App Exposé**: Triggers App Exposé for the active app
-- **Minimize All**: Minimizes all windows of the active app to the Dock
+### Actions
 
-### Scroll Gestures
-Scroll gestures work on **any** Dock icon, regardless of whether the app is active:
+- Click
+  - App Expose (default)
+  - Hide App
+  - Minimize All
+- Scroll Up
+  - Minimize All (default)
+  - Hide App
+  - App Expose
+- Scroll Down
+  - Hide App (default)
+  - Minimize All
+  - App Expose
 
-- **Scroll Up** (default: Minimize All): Minimizes all windows of the app
-- **Scroll Down** (default: App Exposé): Triggers App Exposé for the app
+## Build From Source
 
-### Customization
+```bash
+xcodebuild -project DockActioner.xcodeproj -scheme DockActioner -configuration Debug build
+```
 
-Open Preferences from the menu bar icon or Dock to customize:
-- Click action (Hide App, App Exposé, or Minimize All)
-- Scroll up action (Hide App, App Exposé, or Minimize All)
-- Scroll down action (Hide App, App Exposé, or Minimize All)
+You can also open `DockActioner.xcodeproj` in Xcode and run directly.
 
-### App Exposé Special Behaviors
+## Release and Versioning
 
-- **Apps without windows**: If you click an app icon in App Exposé that has no windows, clicking it again will activate the app and show its main window
-- **Apps not running**: If you click an app icon in App Exposé that isn't running, the app will launch and App Exposé will close
+Releases are tag-driven via GitHub Actions.
 
-## Menu Bar
+- Pushes to `main` run CI only (build verification).
+- Pushing a tag creates signed, notarized release artifacts.
 
-The app appears in your menu bar with a Dock icon. Click it to:
-- Enable/Disable the app
-- Open Preferences
-- Grant Accessibility permission (if needed)
-- Quit the app
+Supported tags:
+
+- Stable: `vX.Y.Z`
+- Prerelease: `vX.Y.Z-beta.N`
+
+Create and push a release tag:
+
+```bash
+./scripts/release.sh 0.0.1
+# or
+./scripts/release.sh 0.0.1-beta.1
+```
+
+## Signing and Notarization (CI)
+
+Required repository secrets:
+
+- `APPLE_SIGNING_CERTIFICATE_P12_BASE64`
+- `APPLE_SIGNING_CERTIFICATE_PASSWORD`
+- `APPLE_SIGNING_IDENTITY`
+- `APPLE_TEAM_ID`
+- `APPLE_NOTARYTOOL_KEY_ID`
+- `APPLE_NOTARYTOOL_ISSUER_ID`
+- `APPLE_NOTARYTOOL_KEY_P8_BASE64`
+
+Homebrew tap automation (cross-repo push):
+
+- `HOMEBREW_TAP_TOKEN`
+
+### Bootstrapping secrets from your Mac
+
+Useful local commands:
+
+```bash
+# Team and signing identities
+security find-identity -v -p codesigning
+
+# Export Developer ID cert + private key to .p12 (choose a strong password)
+security export -k ~/Library/Keychains/login.keychain-db -t identities -f pkcs12 -o dockactioner-signing.p12
+
+# Base64 encode for GitHub secret APPLE_SIGNING_CERTIFICATE_P12_BASE64
+base64 < dockactioner-signing.p12 | pbcopy
+```
+
+`APPLE_NOTARYTOOL_KEY_ID`, `APPLE_NOTARYTOOL_ISSUER_ID`, and `APPLE_NOTARYTOOL_KEY_P8_BASE64` come from an App Store Connect API key you generate in App Store Connect.
+
+## Homebrew Tap Automation
+
+Release workflow updates casks in `apotenza92/homebrew-tap`:
+
+- `Casks/dock-actioner.rb`
+- `Casks/dock-actioner@beta.rb`
+
+Beta-channel rule matches your other projects: `@beta` tracks whichever is newer between latest stable and latest prerelease.
 
 ## Troubleshooting
 
-### App not responding to gestures
-1. Check that the app is enabled in Preferences
-2. Verify Accessibility permission is granted
-3. Try restarting the app from the menu bar
+### Gestures not firing
 
-### App Exposé not triggering
-1. Verify Automation permission is granted
-2. Check your System Settings > Keyboard > Keyboard Shortcuts > Mission Control
-3. Ensure "Application windows" shortcut is enabled
+- Confirm both permissions are granted.
+- Restart DockActioner from Preferences.
+- Reopen target app and retry.
 
-### Scroll gestures not working
-1. Ensure Accessibility permission is granted
-2. Try scrolling more slowly or with more deliberate movements
-3. Check that the app is enabled
+### App Expose does not open
 
-## Building from Source
+- Ensure DockActioner has Accessibility and Input Monitoring permissions.
+- Retry after restarting DockActioner.
 
-1. Clone the repository
-2. Open `DockActioner.xcodeproj` in Xcode
-3. Build and run (⌘R)
-4. The app will be staged to `/Applications` automatically
+### Click sound/beep loops
 
-## License
-
-[Add your license here]
-
+- Update to latest build (click-up/down event consumption and non-keyboard hide/show paths are improved).
+- Verify no third-party global shortcut tool conflicts with Dock gestures.

@@ -3,6 +3,11 @@ import Foundation
 /// Lightweight logger that writes to unified logging (NSLog) and a per-run log file
 /// under ~/Code/DockActioner/logs/DockActioner-<timestamp>.log so you can find it alongside the project.
 enum Logger {
+    private static let debugEnabled: Bool = {
+        let v = ProcessInfo.processInfo.environment["DOCKACTIONER_DEBUG_LOG"]?.lowercased()
+        return v == "1" || v == "true" || v == "yes"
+    }()
+
     private static let queue = DispatchQueue(label: "com.dockappexpose.logger")
     private static let logDirectory: URL = {
         FileManager.default.homeDirectoryForCurrentUser
@@ -25,6 +30,11 @@ enum Logger {
         }
     }
 
+    static func debug(_ message: String) {
+        guard debugEnabled else { return }
+        log(message)
+    }
+
     private static func writeLine(_ line: String) {
         do {
             let fm = FileManager.default
@@ -44,4 +54,3 @@ enum Logger {
         }
     }
 }
-
