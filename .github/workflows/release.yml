@@ -82,9 +82,35 @@ jobs:
           - runner: macos-15
             arch: arm64
             xcode_arch: arm64
+            channel: stable
+            product_name: DockActioner
+            package_prefix: DockActioner
+            bundle_id: pzc.DockActioner
+            app_icon: AppIcon
           - runner: macos-15
             arch: x64
             xcode_arch: x86_64
+            channel: stable
+            product_name: DockActioner
+            package_prefix: DockActioner
+            bundle_id: pzc.DockActioner
+            app_icon: AppIcon
+          - runner: macos-15
+            arch: arm64
+            xcode_arch: arm64
+            channel: beta
+            product_name: DockActioner Beta
+            package_prefix: DockActioner-Beta
+            bundle_id: pzc.DockActioner.beta
+            app_icon: AppIconBeta
+          - runner: macos-15
+            arch: x64
+            xcode_arch: x86_64
+            channel: beta
+            product_name: DockActioner Beta
+            package_prefix: DockActioner-Beta
+            bundle_id: pzc.DockActioner.beta
+            app_icon: AppIconBeta
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
@@ -133,7 +159,7 @@ jobs:
           test -n "$APPLE_SIGNING_IDENTITY"
           test -n "$APPLE_TEAM_ID"
 
-          ARCHIVE_PATH="$RUNNER_TEMP/DockActioner-${{ matrix.arch }}.xcarchive"
+          ARCHIVE_PATH="$RUNNER_TEMP/${{ matrix.package_prefix }}-${{ matrix.arch }}.xcarchive"
 
           xcodebuild \
             -project DockActioner.xcodeproj \
@@ -148,9 +174,12 @@ jobs:
             CODE_SIGN_IDENTITY="$APPLE_SIGNING_IDENTITY" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             MARKETING_VERSION="$VERSION_CORE" \
-            CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            PRODUCT_NAME="${{ matrix.product_name }}" \
+            PRODUCT_BUNDLE_IDENTIFIER="${{ matrix.bundle_id }}" \
+            ASSETCATALOG_COMPILER_APPICON_NAME="${{ matrix.app_icon }}"
 
-          APP_PATH="$ARCHIVE_PATH/Products/Applications/DockActioner.app"
+          APP_PATH="$ARCHIVE_PATH/Products/Applications/${{ matrix.product_name }}.app"
           if [[ ! -d "$APP_PATH" ]]; then
             echo "::error::Expected app bundle not found at $APP_PATH"
             exit 1
@@ -159,7 +188,7 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
           mkdir -p dist
-          cp -R "$APP_PATH" "dist/DockActioner.app"
+          cp -R "$APP_PATH" "dist/${{ matrix.product_name }}.app"
 
       - name: Notarize and staple with notarytool
         shell: bash
@@ -189,7 +218,7 @@ jobs:
             python3 -c 'import base64, pathlib, sys; pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(sys.argv[2]))' "$KEY_PATH" "$APPLE_NOTARYTOOL_KEY_P8_BASE64"
           fi
 
-          APP_PATH="dist/DockActioner.app"
+          APP_PATH="dist/${{ matrix.product_name }}.app"
           UPLOAD_ZIP="$RUNNER_TEMP/notary-upload.zip"
 
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$UPLOAD_ZIP"
@@ -218,14 +247,14 @@ jobs:
           set -euo pipefail
 
           mkdir -p out
-          PACKAGE="DockActioner-v${VERSION}-macos-${{ matrix.arch }}.zip"
-          ditto -c -k --sequesterRsrc --keepParent "dist/DockActioner.app" "out/$PACKAGE"
+          PACKAGE="${{ matrix.package_prefix }}-v${VERSION}-macos-${{ matrix.arch }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "dist/${{ matrix.product_name }}.app" "out/$PACKAGE"
           ls -lah out
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-macos-${{ matrix.arch }}
+          name: release-macos-${{ matrix.channel }}-${{ matrix.arch }}
           path: out/*
           if-no-files-found: error
 

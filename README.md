@@ -28,10 +28,12 @@ Beta channel:
 brew install --cask apotenza92/tap/dock-actioner@beta
 ```
 
+`dock-actioner@beta` installs side-by-side as `DockActioner Beta.app`.
+
 ### Manual
 
 1. Download the latest release zip from GitHub Releases.
-2. Move `DockActioner.app` to `/Applications`.
+2. Move the app bundle to `/Applications` (`DockActioner.app` for stable, `DockActioner Beta.app` for beta).
 3. Launch once and grant required permissions.
 
 ## Permissions
@@ -134,6 +136,7 @@ Release workflow updates casks in `apotenza92/homebrew-tap`:
 - `Casks/dock-actioner@beta.rb`
 
 Beta-channel rule matches your other projects: `@beta` tracks whichever is newer between latest stable and latest prerelease.
+Beta packages use `DockActioner-Beta-v<version>-macos-<arch>.zip` and install `DockActioner Beta.app`.
 
 ## Troubleshooting
 

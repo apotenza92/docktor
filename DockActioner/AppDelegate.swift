@@ -7,6 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statusMenu = NSMenu()
     private let coordinator = DockExposeCoordinator.shared
     private let preferences = Preferences.shared
+    private let settingsWindowIdentifier = NSUserInterfaceItemIdentifier("DockActionerSettingsWindow")
+    private var fallbackPreferencesWindow: NSWindow?
 
     private var isAutomatedMode: Bool {
         let env = ProcessInfo.processInfo.environment
@@ -128,24 +130,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         statusMenu.addItem(.separator())
 
-        if !coordinator.accessibilityGranted {
-            let item = NSMenuItem(title: "Grant Accessibility…",
-                                  action: #selector(promptAccessibility),
-                                  keyEquivalent: "")
-            item.target = self
-            statusMenu.addItem(item)
-        }
-
-        if !coordinator.inputMonitoringGranted {
-            let item = NSMenuItem(title: "Grant Input Monitoring…",
-                                  action: #selector(promptInputMonitoring),
-                                  keyEquivalent: "")
-            item.target = self
-            statusMenu.addItem(item)
-        }
-
-        statusMenu.addItem(.separator())
-
         let quitItem = NSMenuItem(title: "Quit DockActioner",
                                   action: #selector(quit),
                                   keyEquivalent: "q")
@@ -155,22 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     
     @objc private func showPreferences() {
         showPreferencesWindow()
-        NSApp.activate(ignoringOtherApps: true)
         Logger.log("Status menu preferences triggered.")
-    }
-
-    @objc private func promptAccessibility() {
-        coordinator.requestAccessibilityPermission()
-        coordinator.startWhenPermissionAvailable()
-        rebuildStatusMenu()
-        Logger.log("Status menu accessibility prompt triggered.")
-    }
-
-    @objc private func promptInputMonitoring() {
-        coordinator.requestInputMonitoringPermission()
-        coordinator.startWhenPermissionAvailable()
-        rebuildStatusMenu()
-        Logger.log("Status menu input monitoring prompt triggered.")
     }
 
     @objc private func quit() {
@@ -198,29 +167,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func showPreferencesWindow() {
-        if let window = NSApp.windows.first(where: { $0.contentView is NSHostingView<PreferencesView> }) {
-            window.title = "DockActioner Settings"
-            window.titleVisibility = .visible
-            window.titlebarAppearsTransparent = false
-            window.isMovableByWindowBackground = false
+        NSApp.activate(ignoringOtherApps: true)
+
+        if let window = currentPreferencesWindow {
+            configurePreferencesWindow(window)
             window.makeKeyAndOrderFront(nil)
-            window.center()
             return
         }
-        // Fallback to any available window
-        NSApp.activate(ignoringOtherApps: true)
-        if let fallback = NSApp.windows.first {
-            fallback.title = "DockActioner Settings"
-            fallback.titleVisibility = .visible
-            fallback.titlebarAppearsTransparent = false
-            fallback.isMovableByWindowBackground = false
-            fallback.makeKeyAndOrderFront(nil)
+
+        _ = NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        _ = NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self else { return }
+            if let window = self.currentPreferencesWindow {
+                self.configurePreferencesWindow(window)
+                window.makeKeyAndOrderFront(nil)
+                return
+            }
+            self.showFallbackPreferencesWindow()
         }
     }
     
     private func hidePreferencesWindow() {
-        if let window = NSApp.windows.first(where: { $0.contentView is NSHostingView<PreferencesView> }) {
-            window.orderOut(nil)
+        currentPreferencesWindow?.orderOut(nil)
+        fallbackPreferencesWindow?.orderOut(nil)
+    }
+
+    private var currentPreferencesWindow: NSWindow? {
+        if let fallbackPreferencesWindow {
+            return fallbackPreferencesWindow
         }
+        return NSApp.windows.first(where: {
+            $0.identifier == settingsWindowIdentifier || $0.title == "DockActioner Settings" || $0.title == "Settings"
+        })
+    }
+
+    private func configurePreferencesWindow(_ window: NSWindow) {
+        window.identifier = settingsWindowIdentifier
+        window.title = "DockActioner Settings"
+        window.titleVisibility = .visible
+        window.titlebarAppearsTransparent = false
+        window.isMovableByWindowBackground = false
+        window.setContentSize(NSSize(width: 560, height: 620))
+        window.center()
+    }
+
+    private func showFallbackPreferencesWindow() {
+        if let window = fallbackPreferencesWindow {
+            configurePreferencesWindow(window)
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 620),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSHostingView(rootView: PreferencesView(coordinator: DockExposeCoordinator.shared))
+        configurePreferencesWindow(window)
+        fallbackPreferencesWindow = window
+        window.makeKeyAndOrderFront(nil)
     }
 }

@@ -792,11 +792,9 @@ final class DockExposeCoordinator: ObservableObject {
             Logger.debug("WORKFLOW: Non-primary mouse button \(buttonNumber) - allowing through")
             return false
         }
-        
-        // Quick synchronous check: get frontmost app and clicked bundle
+
         let frontmostBefore = FrontmostAppTracker.frontmostBundleIdentifier()
         guard let clickedBundle = DockHitTest.bundleIdentifierAtPoint(location) else {
-            // Not a Dock icon - let it pass through immediately
             return false
         }
 
@@ -804,97 +802,65 @@ final class DockExposeCoordinator: ObservableObject {
             lastDockBundleHit = clickedBundle
             lastDockBundleHitAt = Date()
         }
-        
+
         Logger.debug("WORKFLOW: frontmost=\(frontmostBefore ?? "nil"), clicked=\(clickedBundle), lastTriggered=\(lastTriggeredBundle ?? "nil"), currentExpose=\(currentExposeApp ?? "nil")")
-        
-        // Check if app is running - if not, handle launch in App Exposé
+
         let isRunning = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == clickedBundle }
         if !isRunning && lastTriggeredBundle != nil {
-            // App Exposé is active and user clicked an app that isn't running - launch it
             Logger.debug("WORKFLOW: App Exposé active, clicked app \(clickedBundle) is not running - launching and deactivating App Exposé")
-            lastTriggeredBundle = nil
-            currentExposeApp = nil
-            appsWithoutWindowsInExpose.removeAll()
+            resetExposeTracking()
             launchApp(bundleIdentifier: clickedBundle)
-            return true // Consume event
+            return true
         }
-        
-        // First, check if this is a deactivate click on the current Exposé app
-        // (This can happen even if frontmost differs, since App Exposé might be showing different app's windows)
+
         if let currentApp = currentExposeApp, currentApp == clickedBundle, lastTriggeredBundle != nil {
-            // Check if this app has no windows (was clicked before without windows)
             if appsWithoutWindowsInExpose.contains(clickedBundle) {
-                // Second click on app without windows - activate and show main window
                 Logger.debug("WORKFLOW: Second click on app without windows (\(clickedBundle)) - activating and showing main window")
                 appsWithoutWindowsInExpose.remove(clickedBundle)
-                lastTriggeredBundle = nil
-                currentExposeApp = nil
+                resetExposeTracking()
                 _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: clickedBundle)
-                return true // Consume event
+                return true
             }
-            
-            // User clicked the app whose windows are currently shown in App Exposé - deactivate and switch to this app
-            Logger.debug("WORKFLOW: Deactivate click on currentExposeApp (\(clickedBundle)), activating immediately")
-            
-            // Clear tracking
-            lastTriggeredBundle = nil
-            currentExposeApp = nil
-            appsWithoutWindowsInExpose.removeAll()
-            
-            // Activate immediately - no delay
-            DispatchQueue.main.async { [weak self] in
-                self?.activateApp(bundleIdentifier: clickedBundle)
-            }
-            return true // Consume event
+
+            Logger.debug("WORKFLOW: Deactivate click on currentExposeApp (\(clickedBundle)); passing through to Dock")
+            resetExposeTracking()
+            return false
         }
-        
-        // If clicking a different app while App Exposé is active, update the current Exposé app
+
         if frontmostBefore != clickedBundle {
             if lastTriggeredBundle != nil {
-                // App Exposé is active - user clicked a different app icon to show its windows
                 Logger.debug("WORKFLOW: App Exposé active - user clicked different app (\(clickedBundle)) to show its windows")
-                
-                // Check if this app has windows
+
                 if !WindowManager.hasVisibleWindows(bundleIdentifier: clickedBundle) {
                     Logger.debug("WORKFLOW: App \(clickedBundle) has no visible windows - tracking for potential second click")
                     appsWithoutWindowsInExpose.insert(clickedBundle)
                 } else {
                     appsWithoutWindowsInExpose.remove(clickedBundle)
                 }
-                
                 currentExposeApp = clickedBundle
                 Logger.debug("WORKFLOW: Updated currentExposeApp=\(clickedBundle)")
-                // Let the event pass through so App Exposé shows this app's windows
                 return false
             } else {
-                // Normal case: different app clicked, no App Exposé active
                 Logger.debug("WORKFLOW: Different app clicked (allowing Dock activation)")
                 currentExposeApp = nil
                 appsWithoutWindowsInExpose.removeAll()
                 return false
             }
         }
-        
-        // Same app clicked - check if we just triggered Exposé for this app (original trigger app)
+
         if let lastBundle = lastTriggeredBundle, lastBundle == clickedBundle {
-            // User clicked the original app that triggered Exposé - deactivate and stay on that app
             Logger.debug("WORKFLOW: Deactivate click on original trigger app (\(clickedBundle)), staying on this app")
-            lastTriggeredBundle = nil
-            currentExposeApp = nil
-            appsWithoutWindowsInExpose.removeAll()
-            // Event passes to Dock, which will close Exposé and keep this app frontmost
+            resetExposeTracking()
             return false
         }
-        
-        // Execute the configured click action (with modifier-based overrides)
-        let baseAction = preferences.clickAction
-        let action = resolvedAction(for: baseAction, flags: flags)
+
+        let action = configuredAction(for: .click, flags: flags)
         lastActionExecuted = action
         lastActionExecutedBundle = clickedBundle
         lastActionExecutedSource = "click"
         lastActionExecutedAt = Date()
-        Logger.log("WORKFLOW: Executing click action (button \(buttonNumber)): \(action.rawValue) for \(clickedBundle) (base=\(baseAction.rawValue), flags=\(flags.rawValue))")
-        
+        Logger.log("WORKFLOW: Executing click action (button \(buttonNumber)): \(action.rawValue) for \(clickedBundle) (modifiers=\(modifierCombination(from: flags).rawValue), flags=\(flags.rawValue))")
+
         switch action {
         case .hideApp:
             if WindowManager.isAppHidden(bundleIdentifier: clickedBundle) {
@@ -903,33 +869,30 @@ final class DockExposeCoordinator: ObservableObject {
             } else {
                 _ = WindowManager.hideAllWindows(bundleIdentifier: clickedBundle)
             }
-            lastTriggeredBundle = nil
-            currentExposeApp = nil
-            appsWithoutWindowsInExpose.removeAll()
-            return true // Consume event to prevent Dock from processing it
+            resetExposeTracking()
+            return true
         case .hideOthers:
             if WindowManager.anyHiddenOthers(excluding: clickedBundle) {
                 _ = WindowManager.showAllApplications()
             } else {
                 _ = WindowManager.hideOthers(bundleIdentifier: clickedBundle)
             }
-            lastTriggeredBundle = nil
-            currentExposeApp = nil
-            appsWithoutWindowsInExpose.removeAll()
+            resetExposeTracking()
             return true
         case .bringAllToFront:
             if WindowManager.isAppHidden(bundleIdentifier: clickedBundle) {
                 _ = WindowManager.unhideApp(bundleIdentifier: clickedBundle)
             }
             _ = WindowManager.bringAllToFront(bundleIdentifier: clickedBundle)
-            lastTriggeredBundle = nil
-            currentExposeApp = nil
-            appsWithoutWindowsInExpose.removeAll()
+            resetExposeTracking()
             return true
         case .appExpose:
             Logger.debug("WORKFLOW: App Exposé trigger from click")
             triggerAppExpose(for: clickedBundle)
-            return true // Consume event
+            return true
+        case .singleAppMode:
+            performSingleAppMode(targetBundleIdentifier: clickedBundle, frontmostBefore: frontmostBefore)
+            return true
         case .minimizeAll:
             if shouldThrottleMinimize(bundleIdentifier: clickedBundle) {
                 Logger.debug("WORKFLOW: Minimize throttle active for \(clickedBundle); ignoring click")
@@ -943,15 +906,15 @@ final class DockExposeCoordinator: ObservableObject {
             } else {
                 _ = WindowManager.minimizeAllWindows(bundleIdentifier: clickedBundle)
             }
-            return true // Consume event to prevent Dock from processing it
+            return true
         case .quitApp:
             _ = WindowManager.quitApp(bundleIdentifier: clickedBundle)
-            return true // Consume event
+            return true
         @unknown default:
             return false
         }
     }
-    
+
     private func handleScroll(at location: CGPoint, direction: ScrollDirection, flags: CGEventFlags) -> Bool {
         if selfTestActive {
             if let bundle = DockHitTest.bundleIdentifierAtPoint(location) {
@@ -963,18 +926,17 @@ final class DockExposeCoordinator: ObservableObject {
         }
 
         Logger.debug("WORKFLOW: Scroll \(direction == .up ? "up" : "down") received at \(location.x), \(location.y)")
-        
         guard let clickedBundle = DockHitTest.bundleIdentifierAtPoint(location) else {
-            // Not a Dock icon - let it pass through immediately
             return false
         }
+
+        let frontmostBefore = FrontmostAppTracker.frontmostBundleIdentifier()
 
         if diagnosticsCaptureActive {
             lastDockBundleHit = clickedBundle
             lastDockBundleHitAt = Date()
         }
         
-        // Debounce rapid successive scroll events for the same bundle/direction (momentum scrolling)
         let now = Date().timeIntervalSinceReferenceDate
         let debounceWindow: TimeInterval = 0.35
         if let lastTime = lastScrollTime,
@@ -984,28 +946,26 @@ final class DockExposeCoordinator: ObservableObject {
            lastDir == direction,
            now - lastTime < debounceWindow {
             Logger.debug("WORKFLOW: Scroll debounced for \(clickedBundle) direction \(direction == .up ? "up" : "down") (Δ \(now - lastTime))")
-            return true // consume to avoid Dock repeat behavior
+            return true
         }
         lastScrollTime = now
         lastScrollBundle = clickedBundle
         lastScrollDirection = direction
-        
-        // If App Exposé is active for this app, allow scroll up to close it
+
         if direction == .up, let current = currentExposeApp, current == clickedBundle, lastTriggeredBundle != nil {
             Logger.debug("WORKFLOW: Scroll up detected while App Exposé active for \(clickedBundle) - exiting")
             exitAppExpose()
             return true
         }
-        
-        // Scroll actions work regardless of if app is active
-        let baseAction = direction == .up ? preferences.scrollUpAction : preferences.scrollDownAction
-        let action = resolvedAction(for: baseAction, flags: flags)
+
+        let source: ActionSource = direction == .up ? .scrollUp : .scrollDown
+        let action = configuredAction(for: source, flags: flags)
         lastActionExecuted = action
         lastActionExecutedBundle = clickedBundle
-        lastActionExecutedSource = direction == .up ? "scrollUp" : "scrollDown"
+        lastActionExecutedSource = source.rawValue
         lastActionExecutedAt = Date()
-        Logger.log("WORKFLOW: Executing scroll \(direction == .up ? "up" : "down") action: \(action.rawValue) for \(clickedBundle) (base=\(baseAction.rawValue), flags=\(flags.rawValue))")
-        
+        Logger.log("WORKFLOW: Executing scroll \(direction == .up ? "up" : "down") action: \(action.rawValue) for \(clickedBundle) (modifiers=\(modifierCombination(from: flags).rawValue), flags=\(flags.rawValue))")
+
         switch action {
         case .hideApp:
             if WindowManager.isAppHidden(bundleIdentifier: clickedBundle) {
@@ -1014,33 +974,29 @@ final class DockExposeCoordinator: ObservableObject {
             } else {
                 _ = WindowManager.hideAllWindows(bundleIdentifier: clickedBundle)
             }
-            lastTriggeredBundle = nil
-            currentExposeApp = nil
-            appsWithoutWindowsInExpose.removeAll()
-            return true // Consume event
+            resetExposeTracking()
+            return true
         case .hideOthers:
             if WindowManager.anyHiddenOthers(excluding: clickedBundle) {
                 _ = WindowManager.showAllApplications()
             } else {
                 _ = WindowManager.hideOthers(bundleIdentifier: clickedBundle)
             }
-            lastTriggeredBundle = nil
-            currentExposeApp = nil
-            appsWithoutWindowsInExpose.removeAll()
+            resetExposeTracking()
             return true
         case .bringAllToFront:
             if WindowManager.isAppHidden(bundleIdentifier: clickedBundle) {
                 _ = WindowManager.unhideApp(bundleIdentifier: clickedBundle)
             }
             _ = WindowManager.bringAllToFront(bundleIdentifier: clickedBundle)
-            lastTriggeredBundle = nil
-            currentExposeApp = nil
-            appsWithoutWindowsInExpose.removeAll()
+            resetExposeTracking()
             return true
         case .appExpose:
-            // Trigger App Exposé for this app (immediate fire for fast double-clicks)
             triggerAppExpose(for: clickedBundle)
-            return true // Consume event
+            return true
+        case .singleAppMode:
+            performSingleAppMode(targetBundleIdentifier: clickedBundle, frontmostBefore: frontmostBefore)
+            return true
         case .minimizeAll:
             if shouldThrottleMinimize(bundleIdentifier: clickedBundle) {
                 Logger.debug("WORKFLOW: Minimize throttle active for \(clickedBundle); ignoring scroll")
@@ -1054,13 +1010,111 @@ final class DockExposeCoordinator: ObservableObject {
             } else {
                 _ = WindowManager.minimizeAllWindows(bundleIdentifier: clickedBundle)
             }
-            return true // Consume event
+            return true
         case .quitApp:
             _ = WindowManager.quitApp(bundleIdentifier: clickedBundle)
-            return true // Consume event
+            return true
         @unknown default:
             return false
         }
+    }
+
+    private enum ActionSource: String {
+        case click
+        case scrollUp
+        case scrollDown
+    }
+
+    private enum ModifierCombination: String {
+        case none
+        case shift
+        case option
+        case shiftOption
+    }
+
+    private func modifierCombination(from flags: CGEventFlags) -> ModifierCombination {
+        let hasShift = flags.contains(.maskShift)
+        let hasOption = flags.contains(.maskAlternate)
+        switch (hasShift, hasOption) {
+        case (true, true):
+            return .shiftOption
+        case (true, false):
+            return .shift
+        case (false, true):
+            return .option
+        case (false, false):
+            return .none
+        }
+    }
+
+    private func configuredAction(for source: ActionSource, flags: CGEventFlags) -> DockAction {
+        switch source {
+        case .click:
+            switch modifierCombination(from: flags) {
+            case .none:
+                return preferences.clickAction
+            case .shift:
+                return preferences.shiftClickAction
+            case .option:
+                return preferences.optionClickAction
+            case .shiftOption:
+                return preferences.shiftOptionClickAction
+            }
+        case .scrollUp:
+            switch modifierCombination(from: flags) {
+            case .none:
+                return preferences.scrollUpAction
+            case .shift:
+                return preferences.shiftScrollUpAction
+            case .option:
+                return preferences.optionScrollUpAction
+            case .shiftOption:
+                return preferences.shiftOptionScrollUpAction
+            }
+        case .scrollDown:
+            switch modifierCombination(from: flags) {
+            case .none:
+                return preferences.scrollDownAction
+            case .shift:
+                return preferences.shiftScrollDownAction
+            case .option:
+                return preferences.optionScrollDownAction
+            case .shiftOption:
+                return preferences.shiftOptionScrollDownAction
+            }
+        }
+    }
+
+    private func resetExposeTracking() {
+        lastTriggeredBundle = nil
+        currentExposeApp = nil
+        appsWithoutWindowsInExpose.removeAll()
+    }
+
+    private func performSingleAppMode(targetBundleIdentifier: String, frontmostBefore: String?) {
+        Logger.debug("WORKFLOW: Single app mode target=\(targetBundleIdentifier), frontmostBefore=\(frontmostBefore ?? "nil")")
+
+        if frontmostBefore == targetBundleIdentifier {
+            _ = WindowManager.hideAllWindows(bundleIdentifier: targetBundleIdentifier)
+            resetExposeTracking()
+            return
+        }
+
+        if let frontmostBefore {
+            _ = WindowManager.hideAllWindows(bundleIdentifier: frontmostBefore)
+        }
+
+        let targetRunning = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == targetBundleIdentifier }
+        if targetRunning {
+            if WindowManager.isAppHidden(bundleIdentifier: targetBundleIdentifier) {
+                _ = WindowManager.unhideApp(bundleIdentifier: targetBundleIdentifier)
+            }
+            _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: targetBundleIdentifier)
+        } else {
+            launchApp(bundleIdentifier: targetBundleIdentifier)
+        }
+
+        resetExposeTracking()
     }
     
     private func shouldThrottleMinimize(bundleIdentifier: String) -> Bool {
@@ -1075,39 +1129,6 @@ final class DockExposeCoordinator: ObservableObject {
         lastMinimizeToggleTime[bundleIdentifier] = Date().timeIntervalSinceReferenceDate
     }
 
-    private func resolvedAction(for base: DockAction, flags: CGEventFlags) -> DockAction {
-        let hasOption = flags.contains(.maskAlternate)
-        let hasShift = flags.contains(.maskShift)
-
-        // Shift overrides: bring to front for hide actions; hide app when base is bringAllToFront
-        if hasShift {
-            switch base {
-            case .hideApp, .hideOthers:
-                return .bringAllToFront
-            case .bringAllToFront:
-                return .hideApp
-            default:
-                break
-            }
-        }
-
-        // Option toggles hide app/others; bringAllToFront becomes hide others when option is held
-        if hasOption {
-            switch base {
-            case .hideApp:
-                return .hideOthers
-            case .hideOthers:
-                return .hideApp
-            case .bringAllToFront:
-                return .hideOthers
-            default:
-                break
-            }
-        }
-
-        return base
-    }
-    
     private func triggerAppExpose(for bundleIdentifier: String) {
         Logger.debug("WORKFLOW: Triggering App Exposé for \(bundleIdentifier)")
         

@@ -12,11 +12,9 @@ import AppKit
 struct DockActionerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var body: some Scene {
-        WindowGroup {
+        Settings {
             PreferencesView(coordinator: DockExposeCoordinator.shared)
+                .frame(minWidth: 560, idealWidth: 560)
         }
-        .defaultSize(width: 420, height: 520)
-        .windowResizability(.contentSize)
-        .windowToolbarStyle(.unifiedCompact)
     }
 }

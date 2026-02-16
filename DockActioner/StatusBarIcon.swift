@@ -9,43 +9,92 @@ enum StatusBarIcon {
         image.lockFocus()
         defer { image.unlockFocus() }
 
-        // Square-forward, unique glyph tuned for menu bar legibility.
         NSColor.black.setStroke()
-        NSColor.black.setFill()
 
-        let inset: CGFloat = 1.75
-        let side = min(size.width, size.height) - inset * 2
-        let originX = floor((size.width - side) * 0.5)
-        let originY = floor((size.height - side) * 0.5)
+        let inset: CGFloat = max(0.55, pointSize * 0.045)
+        var glyphRect = NSRect(
+            x: inset,
+            y: inset,
+            width: size.width - inset * 2,
+            height: size.height - inset * 2
+        )
+        glyphRect.origin.y -= pointSize * 0.008
 
-        let outer = NSRect(x: originX, y: originY, width: side, height: side)
-        let lineWidth: CGFloat = max(1.45, round(side * 0.10))
-        let outerPath = NSBezierPath(roundedRect: outer, xRadius: side * 0.16, yRadius: side * 0.16)
-        outerPath.lineWidth = lineWidth
-        outerPath.stroke()
-
-        let module = round(side * 0.25)
-        let margin = round(side * 0.17)
-        let topLeft = NSRect(x: outer.minX + margin,
-                             y: outer.maxY - margin - module,
-                             width: module,
-                             height: module)
-        let bottomRight = NSRect(x: outer.maxX - margin - module,
-                                 y: outer.minY + margin,
-                                 width: module,
-                                 height: module)
-
-        let cornerRadius = max(0.9, module * 0.18)
-        NSBezierPath(roundedRect: topLeft, xRadius: cornerRadius, yRadius: cornerRadius).fill()
-        NSBezierPath(roundedRect: bottomRight, xRadius: cornerRadius, yRadius: cornerRadius).fill()
-
-        let bridge = NSBezierPath()
-        bridge.lineWidth = max(1.3, round(side * 0.09))
-        bridge.lineCapStyle = .round
-        bridge.move(to: NSPoint(x: topLeft.maxX - module * 0.12, y: topLeft.minY + module * 0.12))
-        bridge.line(to: NSPoint(x: bottomRight.minX + module * 0.12, y: bottomRight.maxY - module * 0.12))
-        bridge.stroke()
-
+        drawAirVentGlyph(in: glyphRect, mirroredHorizontally: true, flippedVertically: false)
         return image
+    }
+
+    private static func newStrokePath(lineWidth: CGFloat) -> NSBezierPath {
+        let path = NSBezierPath()
+        path.lineWidth = lineWidth
+        path.lineJoinStyle = .round
+        path.lineCapStyle = .round
+        return path
+    }
+
+    private static func drawAirVentGlyph(in rect: NSRect, mirroredHorizontally: Bool, flippedVertically: Bool) {
+        NSGraphicsContext.saveGraphicsState()
+
+        let transform = NSAffineTransform()
+        transform.translateX(by: rect.minX, yBy: rect.minY)
+        transform.scaleX(by: rect.width / 24.0, yBy: rect.height / 24.0)
+
+        if mirroredHorizontally {
+            transform.translateX(by: 24.0, yBy: 0.0)
+            transform.scaleX(by: -1.0, yBy: 1.0)
+        }
+
+        if flippedVertically {
+            transform.translateX(by: 0.0, yBy: 24.0)
+            transform.scaleX(by: 1.0, yBy: -1.0)
+        }
+
+        transform.concat()
+
+        let topBody = newStrokePath(lineWidth: 2.0)
+        topBody.move(to: NSPoint(x: 6.0, y: 12.0))
+        topBody.line(to: NSPoint(x: 4.0, y: 12.0))
+        topBody.curve(to: NSPoint(x: 2.0, y: 10.0),
+                      controlPoint1: NSPoint(x: 2.9, y: 12.0),
+                      controlPoint2: NSPoint(x: 2.0, y: 11.1))
+        topBody.line(to: NSPoint(x: 2.0, y: 5.0))
+        topBody.curve(to: NSPoint(x: 4.0, y: 3.0),
+                      controlPoint1: NSPoint(x: 2.0, y: 3.9),
+                      controlPoint2: NSPoint(x: 2.9, y: 3.0))
+        topBody.line(to: NSPoint(x: 20.0, y: 3.0))
+        topBody.curve(to: NSPoint(x: 22.0, y: 5.0),
+                      controlPoint1: NSPoint(x: 21.1, y: 3.0),
+                      controlPoint2: NSPoint(x: 22.0, y: 3.9))
+        topBody.line(to: NSPoint(x: 22.0, y: 10.0))
+        topBody.curve(to: NSPoint(x: 20.0, y: 12.0),
+                      controlPoint1: NSPoint(x: 22.0, y: 11.1),
+                      controlPoint2: NSPoint(x: 21.1, y: 12.0))
+        topBody.line(to: NSPoint(x: 18.0, y: 12.0))
+        topBody.stroke()
+
+        let midBar = newStrokePath(lineWidth: 2.0)
+        midBar.move(to: NSPoint(x: 6.0, y: 8.0))
+        midBar.line(to: NSPoint(x: 18.0, y: 8.0))
+        midBar.stroke()
+
+        let rightOutlet = newStrokePath(lineWidth: 2.0)
+        rightOutlet.appendArc(withCenter: NSPoint(x: 16.5, y: 19.5),
+                              radius: 2.5,
+                              startAngle: -53.0,
+                              endAngle: 179.0,
+                              clockwise: false)
+        rightOutlet.line(to: NSPoint(x: 14.0, y: 12.0))
+        rightOutlet.stroke()
+
+        let leftOutlet = newStrokePath(lineWidth: 2.0)
+        leftOutlet.appendArc(withCenter: NSPoint(x: 8.0, y: 17.0),
+                             radius: 2.0,
+                             startAngle: -134.5,
+                             endAngle: 0.0,
+                             clockwise: true)
+        leftOutlet.line(to: NSPoint(x: 10.0, y: 12.0))
+        leftOutlet.stroke()
+
+        NSGraphicsContext.restoreGraphicsState()
     }
 }

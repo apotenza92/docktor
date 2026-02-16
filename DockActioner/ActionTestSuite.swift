@@ -207,6 +207,11 @@ final class ActionTestSuite {
                 return (true, "Posted App Expose hotkey (not configured in System Settings; verification skipped)")
             }
             return (true, "Posted App Expose hotkey")
+        case .singleAppMode:
+            let hidden = WindowManager.isAppHidden(bundleIdentifier: targetBundleIdentifier)
+            let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            let passed = hidden || front == targetBundleIdentifier
+            return (passed, "Single app mode frontmost=\(front ?? "nil") hidden=\(hidden)")
         }
     }
 
