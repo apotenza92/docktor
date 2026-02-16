@@ -79,10 +79,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-15
             arch: arm64
-          - runner: macos-13
+            xcode_arch: arm64
+          - runner: macos-15
             arch: x64
+            xcode_arch: x86_64
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
@@ -140,6 +142,8 @@ jobs:
             -destination "generic/platform=macOS" \
             -archivePath "$ARCHIVE_PATH" \
             archive \
+            ARCHS="${{ matrix.xcode_arch }}" \
+            ONLY_ACTIVE_ARCH=YES \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="$APPLE_SIGNING_IDENTITY" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
