@@ -5,20 +5,18 @@
     <description>DockActioner update feed (stable channel)</description>
     <language>en</language>
     <item>
-      <title>Version 0.0.4</title>
-      <link>https://github.com/apotenza92/dock-actioner/releases/tag/v0.0.4</link>
-      <sparkle:version>490000</sparkle:version>
-      <sparkle:shortVersionString>0.0.4</sparkle:shortVersionString>
+      <title>Version 0.0.5</title>
+      <link>https://github.com/apotenza92/dock-actioner/releases/tag/v0.0.5</link>
+      <sparkle:version>590000</sparkle:version>
+      <sparkle:shortVersionString>0.0.5</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
       <sparkle:fullReleaseNotesLink>https://github.com/apotenza92/dock-actioner/blob/main/CHANGELOG.md</sparkle:fullReleaseNotesLink>
-      <description sparkle:format="plain-text"><![CDATA[- Fixed first-click App Expose reliability by aligning click interception with down/up event pairs so Dock icons no longer get stuck pressed.
-- Reworked App Expose activation flow to use a single-shot trigger with activation-state coordination, removing jumpy re-entry/cancel loops.
-- Improved App Expose focus handoff so switching between apps while Expose is open correctly activates the newly selected app when exiting.
-- Added a dedicated first-click App Expose automated suite that validates both dispatch and on-screen Expose evidence across repeated iterations.]]></description>
-      <pubDate>Wed, 18 Feb 2026 01:35:15 +0000</pubDate>
-      <enclosure url="https://github.com/apotenza92/dock-actioner/releases/download/v0.0.4/DockActioner-v0.0.4-macos-arm64.zip"
-                 sparkle:edSignature="D8WljcD0F0f4qnQSjQ8zs3Z6+xzT9mcI5w17pFAU5VTp0e5DogM8ewhhXxt7NFmp77HjpxX3bO2RhYEiv9m+Bg=="
-                 length="4452172"
+      <description sparkle:format="plain-text"><![CDATA[- Updated defaults so first click (no modifier) uses App Expose with the "requires multiple windows" safeguard enabled.
+- Updated "Reset mappings to defaults" to restore the same first-click App Expose behavior.]]></description>
+      <pubDate>Wed, 18 Feb 2026 01:37:42 +0000</pubDate>
+      <enclosure url="https://github.com/apotenza92/dock-actioner/releases/download/v0.0.5/DockActioner-v0.0.5-macos-arm64.zip"
+                 sparkle:edSignature="hIGeyoW1Xjy127s5RAkBNbeT7SaE4AtkIGT+9TSLczOw6pvYs/wLXhs5t7LRc2aQvhbphY+0lfXVfoi0wjilDw=="
+                 length="4452132"
                  type="application/octet-stream" />
     </item>
   </channel>
