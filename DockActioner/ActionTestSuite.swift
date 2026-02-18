@@ -102,6 +102,8 @@ final class ActionTestSuite {
         let targetPoint = liveDockPoint(for: targetBundleIdentifier, around: initialPoint) ?? initialPoint
 
         let baseline = coordinator.lastActionExecutedAt ?? Date.distantPast
+        let dispatchTimeout: TimeInterval = trigger == .click ? 1.05 : 0.65
+        let fallbackDispatchTimeout: TimeInterval = trigger == .click ? 1.2 : 0.75
 
         switch trigger {
         case .click:
@@ -118,6 +120,16 @@ final class ActionTestSuite {
         let points = candidatePoints(seed: targetPoint, bundleIdentifier: targetBundleIdentifier)
         var okDispatch = false
         for point in points {
+            // Avoid sending a second synthetic click when dispatch from a prior attempt
+            // arrives slightly late (important for toggle actions such as hideOthers).
+            if didDispatch(expectedAction: action,
+                           expectedBundle: targetBundleIdentifier,
+                           expectedSource: trigger.rawValue,
+                           baseline: baseline) {
+                okDispatch = true
+                break
+            }
+
             coordinator.postSyntheticMouseMove(to: point)
             try? await Task.sleep(nanoseconds: 90_000_000)
 
@@ -135,7 +147,7 @@ final class ActionTestSuite {
                 expectedBundle: targetBundleIdentifier,
                 expectedSource: trigger.rawValue,
                 baseline: baseline,
-                timeout: 0.65
+                timeout: dispatchTimeout
             )
             if okDispatch { break }
         }
@@ -161,7 +173,7 @@ final class ActionTestSuite {
                     expectedBundle: targetBundleIdentifier,
                     expectedSource: trigger.rawValue,
                     baseline: baseline,
-                    timeout: 0.75
+                    timeout: fallbackDispatchTimeout
                 )
             }
         }
@@ -254,16 +266,26 @@ final class ActionTestSuite {
     private func waitForDispatch(expectedAction: DockAction, expectedBundle: String, expectedSource: String, baseline: Date, timeout: TimeInterval) async -> Bool {
         let start = Date()
         while Date().timeIntervalSince(start) < timeout {
-            if let at = coordinator.lastActionExecutedAt,
-               at > baseline,
-               coordinator.lastActionExecuted == expectedAction,
-               coordinator.lastActionExecutedBundle == expectedBundle,
-               coordinator.lastActionExecutedSource == expectedSource {
+            if didDispatch(expectedAction: expectedAction,
+                           expectedBundle: expectedBundle,
+                           expectedSource: expectedSource,
+                           baseline: baseline) {
                 return true
             }
             try? await Task.sleep(nanoseconds: 40_000_000)
         }
         return false
+    }
+
+    private func didDispatch(expectedAction: DockAction,
+                             expectedBundle: String,
+                             expectedSource: String,
+                             baseline: Date) -> Bool {
+        guard let at = coordinator.lastActionExecutedAt else { return false }
+        return at > baseline
+            && coordinator.lastActionExecuted == expectedAction
+            && coordinator.lastActionExecutedBundle == expectedBundle
+            && coordinator.lastActionExecutedSource == expectedSource
     }
 
     private func launchTarget(bundleIdentifier: String) async {

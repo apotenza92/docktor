@@ -46,6 +46,7 @@ final class DockExposeCoordinator: ObservableObject {
     @Published private(set) var functionalTestStatus: String?
     @Published private(set) var appExposeHotkeyTestStatus: String?
     @Published private(set) var firstClickAppExposeTestStatus: String?
+    @Published private(set) var appExposeReentryTestStatus: String?
 
     @Published private(set) var lastActionExecuted: DockAction?
     @Published private(set) var lastActionExecutedBundle: String?
@@ -64,6 +65,11 @@ final class DockExposeCoordinator: ObservableObject {
     }
 
     private struct FirstClickAppExposeIterationResult {
+        let passed: Bool
+        let detail: String
+    }
+
+    private struct AppExposeReentryIterationResult {
         let passed: Bool
         let detail: String
     }
@@ -365,6 +371,164 @@ final class DockExposeCoordinator: ObservableObject {
                 }
             }
         }
+    }
+
+    func runAppExposeReentryRegressionTest() {
+        appExposeReentryTestStatus = "Running App Expose re-entry regression test..."
+
+        Task { [weak self] in
+            guard let self else { return }
+
+            refreshPermissionsAndSecurityState()
+            guard accessibilityGranted else {
+                appExposeReentryTestStatus = "App Expose re-entry test failed: Accessibility not granted"
+                return
+            }
+            guard inputMonitoringGranted else {
+                appExposeReentryTestStatus = "App Expose re-entry test failed: Input Monitoring not granted"
+                return
+            }
+
+            if !isRunning {
+                startIfPossible()
+            }
+            guard isRunning else {
+                appExposeReentryTestStatus = "App Expose re-entry test failed: event tap not running (\(lastStartError ?? "unknown error"))"
+                return
+            }
+
+            let env = ProcessInfo.processInfo.environment
+            let iterations = max(1, Int(env["DOCKACTIONER_APPEXPOSE_REENTRY_ITERATIONS"] ?? "8") ?? 8)
+            let preferredTarget = env["DOCKACTIONER_APPEXPOSE_REENTRY_TARGET"]
+
+            guard let targetBundle = await selectFirstClickAppExposeTargetBundle(preferred: preferredTarget) else {
+                appExposeReentryTestStatus = "App Expose re-entry test failed: could not find a testable Dock icon target"
+                return
+            }
+
+            let savedFirstClickBehavior = preferences.firstClickBehavior
+            let savedFirstClickRequiresMulti = preferences.firstClickAppExposeRequiresMultipleWindows
+            let savedClickAction = preferences.clickAction
+            defer {
+                preferences.firstClickBehavior = savedFirstClickBehavior
+                preferences.firstClickAppExposeRequiresMultipleWindows = savedFirstClickRequiresMulti
+                preferences.clickAction = savedClickAction
+            }
+
+            preferences.firstClickBehavior = .appExpose
+            preferences.firstClickAppExposeRequiresMultipleWindows = false
+            preferences.clickAction = .appExpose
+
+            Logger.log("App Expose re-entry test: target=\(targetBundle) iterations=\(iterations)")
+
+            var passes = 0
+            var failures: [String] = []
+
+            for index in 1...iterations {
+                let result = await runSingleAppExposeReentryIteration(index: index,
+                                                                      total: iterations,
+                                                                      targetBundle: targetBundle)
+                if result.passed {
+                    passes += 1
+                } else {
+                    failures.append("#\(index): \(result.detail)")
+                }
+            }
+
+            let summary = "App Expose re-entry test: passed \(passes)/\(iterations) target=\(targetBundle)"
+            if failures.isEmpty {
+                appExposeReentryTestStatus = summary
+            } else {
+                appExposeReentryTestStatus = summary + ". Failures: " + failures.joined(separator: " | ")
+            }
+            Logger.log(appExposeReentryTestStatus ?? summary)
+
+            if env["DOCKACTIONER_APPEXPOSE_REENTRY_TEST"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+    }
+
+    private func runSingleAppExposeReentryIteration(index: Int,
+                                                    total: Int,
+                                                    targetBundle: String) async -> AppExposeReentryIterationResult {
+        await ensureAppRunningForFirstClickTest(bundleIdentifier: targetBundle)
+        exitAppExpose()
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        makeNonTargetAppFrontmost(targetBundle: targetBundle)
+        try? await Task.sleep(nanoseconds: 220_000_000)
+
+        guard let initialPoint = findDockIconPoint(bundleIdentifier: targetBundle) else {
+            return AppExposeReentryIterationResult(passed: false,
+                                                   detail: "could not locate Dock icon")
+        }
+
+        let points = firstClickAppExposeCandidatePoints(seed: initialPoint, bundleIdentifier: targetBundle)
+        if points.isEmpty {
+            return AppExposeReentryIterationResult(passed: false,
+                                                   detail: "no candidate click points")
+        }
+
+        var attemptFailures: [String] = []
+
+        for (attemptIndex, point) in points.enumerated() {
+            postSyntheticMouseMove(to: point)
+            try? await Task.sleep(nanoseconds: 90_000_000)
+
+            let hitBundle = DockHitTest.bundleIdentifierAtPoint(point) ?? "nil"
+            let firstBaseline = lastActionExecutedAt ?? Date.distantPast
+            postSyntheticClick(at: point)
+
+            let firstDispatch = await waitForActionDispatch(expectedAction: .appExpose,
+                                                            expectedBundle: targetBundle,
+                                                            expectedSource: "firstClick",
+                                                            baseline: firstBaseline,
+                                                            timeout: 1.2)
+            if !firstDispatch {
+                attemptFailures.append("attempt \(attemptIndex + 1): firstClick dispatch=false hit=\(hitBundle)")
+                exitAppExpose()
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                makeNonTargetAppFrontmost(targetBundle: targetBundle)
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                continue
+            }
+
+            // Simulate selecting an app window from the App Exposé picker: app becomes frontmost
+            // while Exposé tracking state may still indicate an active Exposé session.
+            _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: targetBundle)
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            let frontmostAfterPickerSelection = FrontmostAppTracker.frontmostBundleIdentifier() ?? "nil"
+
+            let secondBaseline = lastActionExecutedAt ?? Date.distantPast
+            postSyntheticMouseMove(to: point)
+            try? await Task.sleep(nanoseconds: 90_000_000)
+            postSyntheticClick(at: point)
+
+            let secondDispatch = await waitForActionDispatch(expectedAction: .appExpose,
+                                                             expectedBundle: targetBundle,
+                                                             expectedSource: "click",
+                                                             baseline: secondBaseline,
+                                                             timeout: 1.2)
+
+            let pointText = "(\(Int(point.x)),\(Int(point.y)))"
+            Logger.log("App Expose re-entry iteration \(index)/\(total) attempt \(attemptIndex + 1)/\(points.count): firstDispatch=\(firstDispatch) secondDispatch=\(secondDispatch) hit=\(hitBundle) frontmostAfterPickerSelection=\(frontmostAfterPickerSelection) point=\(pointText)")
+
+            exitAppExpose()
+            try? await Task.sleep(nanoseconds: 120_000_000)
+
+            if secondDispatch {
+                return AppExposeReentryIterationResult(passed: true, detail: "ok")
+            }
+
+            attemptFailures.append("attempt \(attemptIndex + 1): clickAfterActivation dispatch=false frontmostAfterPickerSelection=\(frontmostAfterPickerSelection)")
+            makeNonTargetAppFrontmost(targetBundle: targetBundle)
+            try? await Task.sleep(nanoseconds: 150_000_000)
+        }
+
+        return AppExposeReentryIterationResult(passed: false,
+                                               detail: attemptFailures.joined(separator: ", "))
     }
 
     private func runSingleFirstClickAppExposeIteration(index: Int,
@@ -1239,7 +1403,10 @@ final class DockExposeCoordinator: ObservableObject {
             return true
         }
 
-        if let currentApp = currentExposeApp, currentApp == clickedBundle, lastTriggeredBundle != nil {
+        if let currentApp = currentExposeApp,
+           currentApp == clickedBundle,
+           lastTriggeredBundle != nil,
+           frontmostBefore != clickedBundle {
             if appsWithoutWindowsInExpose.contains(clickedBundle) {
                 Logger.debug("WORKFLOW: Second click on app without windows (\(clickedBundle)) - activating and showing main window")
                 appsWithoutWindowsInExpose.remove(clickedBundle)
@@ -1276,9 +1443,14 @@ final class DockExposeCoordinator: ObservableObject {
         }
 
         if let lastBundle = lastTriggeredBundle, lastBundle == clickedBundle {
-            Logger.debug("WORKFLOW: Deactivate click on original trigger app (\(clickedBundle)), staying on this app")
-            resetExposeTracking()
-            return false
+            if frontmostBefore == clickedBundle {
+                Logger.debug("WORKFLOW: App Exposé already closed for \(clickedBundle); clearing state")
+                resetExposeTracking()
+            } else {
+                Logger.debug("WORKFLOW: Deactivate click on original trigger app (\(clickedBundle)), staying on this app")
+                resetExposeTracking()
+                return false
+            }
         }
 
         let action = configuredAction(for: .click, flags: flags)
@@ -1705,7 +1877,10 @@ final class DockExposeCoordinator: ObservableObject {
             return true
         }
 
-        if let currentApp = currentExposeApp, currentApp == clickedBundle, lastTriggeredBundle != nil {
+        if let currentApp = currentExposeApp,
+           currentApp == clickedBundle,
+           lastTriggeredBundle != nil,
+           frontmostBefore != clickedBundle {
             return true
         }
 
@@ -1717,7 +1892,10 @@ final class DockExposeCoordinator: ObservableObject {
         }
 
         if let lastBundle = lastTriggeredBundle, lastBundle == clickedBundle {
-            return false
+            if frontmostBefore != clickedBundle {
+                return false
+            }
+            return configuredAction(for: .click, flags: flags) != .none
         }
 
         return configuredAction(for: .click, flags: flags) != .none

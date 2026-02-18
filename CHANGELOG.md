@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.0.6]
+
+- Fixed App Expose re-entry handling so clicking a Dock icon after selecting a window from App Expose reliably triggers "Click after App activation" actions.
+- Added a dedicated App Expose re-entry regression suite that reproduces picker-selection then same-icon re-click behavior and verifies App Expose dispatch.
+- Hardened action test dispatch timing to avoid retry-induced toggle flakiness in `click hideOthers`.
+
 ## [v0.0.5]
 
 - Updated defaults so first click (no modifier) uses App Expose with the "requires multiple windows" safeguard enabled.

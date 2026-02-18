@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             || env["DOCKACTIONER_TEST_SUITE"] == "1"
             || env["DOCKACTIONER_APPEXPOSE_HOTKEY_TEST"] == "1"
             || env["DOCKACTIONER_FIRSTCLICK_APPEXPOSE_TEST"] == "1"
+            || env["DOCKACTIONER_APPEXPOSE_REENTRY_TEST"] == "1"
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -81,6 +82,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 120.0) {
                 Logger.log("First-click App Expose test timeout; terminating")
+                NSApp.terminate(nil)
+            }
+        }
+
+        if ProcessInfo.processInfo.environment["DOCKACTIONER_APPEXPOSE_REENTRY_TEST"] == "1" {
+            Logger.log("App Expose re-entry test enabled via DOCKACTIONER_APPEXPOSE_REENTRY_TEST=1")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+                self?.coordinator.runAppExposeReentryRegressionTest()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 150.0) {
+                Logger.log("App Expose re-entry test timeout; terminating")
                 NSApp.terminate(nil)
             }
         }
