@@ -5,21 +5,20 @@
     <description>DockActioner update feed (beta channel)</description>
     <language>en</language>
     <item>
-      <title>Version 0.0.3</title>
-      <link>https://github.com/apotenza92/dock-actioner/releases/tag/v0.0.3</link>
-      <sparkle:version>390000</sparkle:version>
-      <sparkle:shortVersionString>0.0.3</sparkle:shortVersionString>
+      <title>Version 0.0.4</title>
+      <link>https://github.com/apotenza92/dock-actioner/releases/tag/v0.0.4</link>
+      <sparkle:version>490000</sparkle:version>
+      <sparkle:shortVersionString>0.0.4</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
       <sparkle:fullReleaseNotesLink>https://github.com/apotenza92/dock-actioner/blob/main/CHANGELOG.md</sparkle:fullReleaseNotesLink>
-      <description sparkle:format="plain-text"><![CDATA[- Added native Sparkle updater integration with an in-app "Check for Updates" flow and configurable update check frequency in Settings.
-- Added signed Sparkle appcasts for stable/beta and arm64/x64, with release automation that regenerates and publishes appcasts from GitHub releases.
-- Unified release notes to a single `CHANGELOG.md` source used by both GitHub Releases and Sparkle update descriptions.
-- Improved first-run permission prompting for Accessibility and Input Monitoring and refreshed the compact settings layout with a table-based mapping editor.
-- Added a no-op (`-`) action option, updated modifier defaults (`Shift+Click` -> Bring All to Front), and a "Reset mappings to defaults" control.]]></description>
-      <pubDate>Mon, 16 Feb 2026 13:06:15 +0000</pubDate>
-      <enclosure url="https://github.com/apotenza92/dock-actioner/releases/download/v0.0.3/DockActioner-Beta-v0.0.3-macos-arm64.zip"
-                 sparkle:edSignature="MZixdLaUk6phz9YFrAqmUD8B9x/Ydjy6S7OSHIJ93i1iO/haixSOqmwkPcq3a4Kj/PfKG4r3hLhocPTbHRzpCQ=="
-                 length="2635699"
+      <description sparkle:format="plain-text"><![CDATA[- Fixed first-click App Expose reliability by aligning click interception with down/up event pairs so Dock icons no longer get stuck pressed.
+- Reworked App Expose activation flow to use a single-shot trigger with activation-state coordination, removing jumpy re-entry/cancel loops.
+- Improved App Expose focus handoff so switching between apps while Expose is open correctly activates the newly selected app when exiting.
+- Added a dedicated first-click App Expose automated suite that validates both dispatch and on-screen Expose evidence across repeated iterations.]]></description>
+      <pubDate>Wed, 18 Feb 2026 01:35:15 +0000</pubDate>
+      <enclosure url="https://github.com/apotenza92/dock-actioner/releases/download/v0.0.4/DockActioner-Beta-v0.0.4-macos-arm64.zip"
+                 sparkle:edSignature="gC5I9qDCPUB6XmFmNPfSa6c+dKy1QLw20+tl9JIGInfljwihdIn8M0ZO69jUKgi8amU8xUqAuCykAW9H5f/+AA=="
+                 length="2674761"
                  type="application/octet-stream" />
     </item>
   </channel>
