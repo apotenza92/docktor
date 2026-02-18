@@ -6,6 +6,11 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.0.5]
+
+- Updated defaults so first click (no modifier) uses App Expose with the "requires multiple windows" safeguard enabled.
+- Updated "Reset mappings to defaults" to restore the same first-click App Expose behavior.
+
 ## [v0.0.4]
 
 - Fixed first-click App Expose reliability by aligning click interception with down/up event pairs so Dock icons no longer get stuck pressed.

@@ -443,10 +443,10 @@ final class Preferences: ObservableObject {
            let behavior = FirstClickBehavior(rawValue: rawFirstClickBehavior) {
             firstClickBehavior = behavior
         } else {
-            firstClickBehavior = .activateApp
+            firstClickBehavior = .appExpose
         }
 
-        let firstClickAppExposeRequiresMultipleWindows = userDefaults.object(forKey: firstClickAppExposeRequiresMultipleWindowsKey) as? Bool ?? false
+        let firstClickAppExposeRequiresMultipleWindows = userDefaults.object(forKey: firstClickAppExposeRequiresMultipleWindowsKey) as? Bool ?? true
 
         // Assign stored properties last
         self.clickAction = clickAction
@@ -484,8 +484,8 @@ final class Preferences: ObservableObject {
 
     func resetMappingsToDefaults() {
         clickAction = .appExpose
-        firstClickBehavior = .activateApp
-        firstClickAppExposeRequiresMultipleWindows = false
+        firstClickBehavior = .appExpose
+        firstClickAppExposeRequiresMultipleWindows = true
 
         firstClickShiftAction = .bringAllToFront
         firstClickOptionAction = .singleAppMode
