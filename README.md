@@ -67,7 +67,12 @@ Open **Preferences** from the menu bar icon.
 
 ### Actions
 
-- Click
+- First Click (inactive app)
+  - No Modifier: Activate App (default), Bring All to Front, App Exposé
+  - Shift / Option / Shift+Option: independent action mappings
+  - Optional: only trigger App Exposé when app has multiple windows (counts all app windows)
+
+- Click after App activation
   - App Expose (default)
   - Hide App
   - Minimize All

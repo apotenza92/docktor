@@ -4,6 +4,7 @@ import ServiceManagement
 
 enum DockAction: String, CaseIterable, Codable {
     case none = "none"
+    case activateApp = "activateApp"
     case hideApp = "hideApp"
     case appExpose = "appExpose"
     case minimizeAll = "minimizeAll"
@@ -15,6 +16,7 @@ enum DockAction: String, CaseIterable, Codable {
     var displayName: String {
         switch self {
         case .none: return "-"
+        case .activateApp: return "Activate App"
         case .hideApp: return "Hide App"
         case .appExpose: return "App Exposé"
         case .minimizeAll: return "Minimize All"
@@ -22,6 +24,20 @@ enum DockAction: String, CaseIterable, Codable {
         case .bringAllToFront: return "Bring All to Front"
         case .hideOthers: return "Hide Others"
         case .singleAppMode: return "Single App Mode"
+        }
+    }
+}
+
+enum FirstClickBehavior: String, CaseIterable, Codable {
+    case activateApp = "activateApp"
+    case bringAllToFront = "bringAllToFront"
+    case appExpose = "appExpose"
+
+    var displayName: String {
+        switch self {
+        case .activateApp: return "Activate App"
+        case .bringAllToFront: return "Bring All to Front"
+        case .appExpose: return "App Exposé"
         }
     }
 }
@@ -99,6 +115,12 @@ final class Preferences: ObservableObject {
     private let startAtLoginKey = "startAtLogin"
     private let updateCheckFrequencyKey = "updateCheckFrequency"
     private let lastUpdateCheckTimestampKey = "lastUpdateCheckTimestamp"
+    private let firstClickBehaviorKey = "firstClickBehavior"
+    private let firstClickShiftActionKey = "firstClickShiftAction"
+    private let firstClickOptionActionKey = "firstClickOptionAction"
+    private let firstClickShiftOptionActionKey = "firstClickShiftOptionAction"
+    private let firstClickAppExposeRequiresMultipleWindowsKey = "firstClickAppExposeRequiresMultipleWindows"
+    private let firstClickModifierActionsMigratedKey = "firstClickModifierActionsMigrated_v6"
 
     // Prevent feedback loop when we adjust login item after a failed toggle.
     private var applyingLoginItemChange = false
@@ -106,6 +128,36 @@ final class Preferences: ObservableObject {
     @Published var clickAction: DockAction {
         didSet {
             userDefaults.set(clickAction.rawValue, forKey: clickActionKey)
+        }
+    }
+
+    @Published var firstClickBehavior: FirstClickBehavior {
+        didSet {
+            userDefaults.set(firstClickBehavior.rawValue, forKey: firstClickBehaviorKey)
+        }
+    }
+
+    @Published var firstClickAppExposeRequiresMultipleWindows: Bool {
+        didSet {
+            userDefaults.set(firstClickAppExposeRequiresMultipleWindows, forKey: firstClickAppExposeRequiresMultipleWindowsKey)
+        }
+    }
+
+    @Published var firstClickShiftAction: DockAction {
+        didSet {
+            userDefaults.set(firstClickShiftAction.rawValue, forKey: firstClickShiftActionKey)
+        }
+    }
+
+    @Published var firstClickOptionAction: DockAction {
+        didSet {
+            userDefaults.set(firstClickOptionAction.rawValue, forKey: firstClickOptionActionKey)
+        }
+    }
+
+    @Published var firstClickShiftOptionAction: DockAction {
+        didSet {
+            userDefaults.set(firstClickShiftOptionAction.rawValue, forKey: firstClickShiftOptionActionKey)
         }
     }
 
@@ -285,6 +337,10 @@ final class Preferences: ObservableObject {
         var optionClickAction = Self.loadAction(from: userDefaults, forKey: optionClickActionKey) ?? .singleAppMode
         var shiftOptionClickAction = Self.loadAction(from: userDefaults, forKey: shiftOptionClickActionKey) ?? .none
 
+        var firstClickShiftAction = Self.loadAction(from: userDefaults, forKey: firstClickShiftActionKey) ?? .bringAllToFront
+        var firstClickOptionAction = Self.loadAction(from: userDefaults, forKey: firstClickOptionActionKey) ?? .singleAppMode
+        var firstClickShiftOptionAction = Self.loadAction(from: userDefaults, forKey: firstClickShiftOptionActionKey) ?? .none
+
         var shiftScrollUpAction = Self.loadAction(from: userDefaults, forKey: shiftScrollUpActionKey) ?? .none
         var optionScrollUpAction = Self.loadAction(from: userDefaults, forKey: optionScrollUpActionKey) ?? .none
         var shiftOptionScrollUpAction = Self.loadAction(from: userDefaults, forKey: shiftOptionScrollUpActionKey) ?? .none
@@ -329,9 +385,31 @@ final class Preferences: ObservableObject {
             userDefaults.set(true, forKey: modifierDefaultsMigratedKey)
         }
 
+        let firstClickModifierMigrated = userDefaults.bool(forKey: firstClickModifierActionsMigratedKey)
+        if !firstClickModifierMigrated {
+            firstClickShiftAction = shiftClickAction
+            firstClickOptionAction = optionClickAction
+            firstClickShiftOptionAction = shiftOptionClickAction
+
+            shiftClickAction = .none
+            optionClickAction = .none
+            shiftOptionClickAction = .none
+
+            userDefaults.set(firstClickShiftAction.rawValue, forKey: firstClickShiftActionKey)
+            userDefaults.set(firstClickOptionAction.rawValue, forKey: firstClickOptionActionKey)
+            userDefaults.set(firstClickShiftOptionAction.rawValue, forKey: firstClickShiftOptionActionKey)
+            userDefaults.set(shiftClickAction.rawValue, forKey: shiftClickActionKey)
+            userDefaults.set(optionClickAction.rawValue, forKey: optionClickActionKey)
+            userDefaults.set(shiftOptionClickAction.rawValue, forKey: shiftOptionClickActionKey)
+            userDefaults.set(true, forKey: firstClickModifierActionsMigratedKey)
+        }
+
         Self.seedIfMissing(shiftClickAction, in: userDefaults, forKey: shiftClickActionKey)
         Self.seedIfMissing(optionClickAction, in: userDefaults, forKey: optionClickActionKey)
         Self.seedIfMissing(shiftOptionClickAction, in: userDefaults, forKey: shiftOptionClickActionKey)
+        Self.seedIfMissing(firstClickShiftAction, in: userDefaults, forKey: firstClickShiftActionKey)
+        Self.seedIfMissing(firstClickOptionAction, in: userDefaults, forKey: firstClickOptionActionKey)
+        Self.seedIfMissing(firstClickShiftOptionAction, in: userDefaults, forKey: firstClickShiftOptionActionKey)
         Self.seedIfMissing(shiftScrollUpAction, in: userDefaults, forKey: shiftScrollUpActionKey)
         Self.seedIfMissing(optionScrollUpAction, in: userDefaults, forKey: optionScrollUpActionKey)
         Self.seedIfMissing(shiftOptionScrollUpAction, in: userDefaults, forKey: shiftOptionScrollUpActionKey)
@@ -360,8 +438,23 @@ final class Preferences: ObservableObject {
             updateCheckFrequency = .daily
         }
 
+        let firstClickBehavior: FirstClickBehavior
+        if let rawFirstClickBehavior = userDefaults.string(forKey: firstClickBehaviorKey),
+           let behavior = FirstClickBehavior(rawValue: rawFirstClickBehavior) {
+            firstClickBehavior = behavior
+        } else {
+            firstClickBehavior = .activateApp
+        }
+
+        let firstClickAppExposeRequiresMultipleWindows = userDefaults.object(forKey: firstClickAppExposeRequiresMultipleWindowsKey) as? Bool ?? false
+
         // Assign stored properties last
         self.clickAction = clickAction
+        self.firstClickBehavior = firstClickBehavior
+        self.firstClickAppExposeRequiresMultipleWindows = firstClickAppExposeRequiresMultipleWindows
+        self.firstClickShiftAction = firstClickShiftAction
+        self.firstClickOptionAction = firstClickOptionAction
+        self.firstClickShiftOptionAction = firstClickShiftOptionAction
         self.shiftClickAction = shiftClickAction
         self.optionClickAction = optionClickAction
         self.shiftOptionClickAction = shiftOptionClickAction
@@ -391,8 +484,15 @@ final class Preferences: ObservableObject {
 
     func resetMappingsToDefaults() {
         clickAction = .appExpose
-        shiftClickAction = .bringAllToFront
-        optionClickAction = .singleAppMode
+        firstClickBehavior = .activateApp
+        firstClickAppExposeRequiresMultipleWindows = false
+
+        firstClickShiftAction = .bringAllToFront
+        firstClickOptionAction = .singleAppMode
+        firstClickShiftOptionAction = .none
+
+        shiftClickAction = .none
+        optionClickAction = .none
         shiftOptionClickAction = .none
 
         scrollUpAction = .hideOthers

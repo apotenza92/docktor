@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             || env["DOCKACTIONER_FUNCTIONAL_TEST"] == "1"
             || env["DOCKACTIONER_TEST_SUITE"] == "1"
             || env["DOCKACTIONER_APPEXPOSE_HOTKEY_TEST"] == "1"
+            || env["DOCKACTIONER_FIRSTCLICK_APPEXPOSE_TEST"] == "1"
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -69,6 +70,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
                 Logger.log("App Expose hotkey test complete; terminating")
+                NSApp.terminate(nil)
+            }
+        }
+
+        if ProcessInfo.processInfo.environment["DOCKACTIONER_FIRSTCLICK_APPEXPOSE_TEST"] == "1" {
+            Logger.log("First-click App Expose test enabled via DOCKACTIONER_FIRSTCLICK_APPEXPOSE_TEST=1")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.coordinator.runFirstClickAppExposeTestSuite()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 120.0) {
+                Logger.log("First-click App Expose test timeout; terminating")
                 NSApp.terminate(nil)
             }
         }
@@ -220,8 +232,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = false
         window.isMovableByWindowBackground = false
-        window.setContentSize(NSSize(width: 740, height: 520))
+        sizePreferencesWindowToContent(window)
         window.center()
+    }
+
+    private func sizePreferencesWindowToContent(_ window: NSWindow) {
+        guard let contentView = window.contentView else { return }
+        contentView.layoutSubtreeIfNeeded()
+        let fittingSize = contentView.fittingSize
+        guard fittingSize.width > 0, fittingSize.height > 0 else { return }
+        window.setContentSize(fittingSize)
     }
 
     private func showFallbackPreferencesWindow() {
@@ -231,14 +251,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        let rootView = PreferencesView(coordinator: DockExposeCoordinator.shared,
+                                       updateManager: UpdateManager.shared)
+        let hostingView = NSHostingView(rootView: rootView)
+        hostingView.layoutSubtreeIfNeeded()
+        let fittingSize = hostingView.fittingSize
+
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 740, height: 520),
+            contentRect: NSRect(origin: .zero,
+                                size: NSSize(width: max(fittingSize.width, 1), height: max(fittingSize.height, 1))),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
-        window.contentView = NSHostingView(rootView: PreferencesView(coordinator: DockExposeCoordinator.shared,
-                                                                      updateManager: UpdateManager.shared))
+        window.contentView = hostingView
         configurePreferencesWindow(window)
         fallbackPreferencesWindow = window
         window.makeKeyAndOrderFront(nil)

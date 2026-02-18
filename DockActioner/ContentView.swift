@@ -22,7 +22,7 @@ struct PreferencesView: View {
         var title: String {
             switch self {
             case .none:
-                return "None"
+                return "No Modifier"
             case .shift:
                 return "⇧ Shift"
             case .option:
@@ -34,10 +34,14 @@ struct PreferencesView: View {
     }
 
     private let modifierColumnWidth: CGFloat = 150
-    private let actionColumnWidth: CGFloat = 185
+    private let firstClickColumnWidth: CGFloat = 160
+    private let actionColumnWidth: CGFloat = 150
+    private let rowHeight: CGFloat = 44
+    private let expandedFirstClickRowHeight: CGFloat = 76
+    private let horizontalPadding: CGFloat = 16
     private let contentFont: Font = .system(size: 14)
     private let sectionTitleFont: Font = .system(size: 14, weight: .semibold)
-    private var tableWidth: CGFloat { modifierColumnWidth + (actionColumnWidth * 3) + 3 }
+    private var tableWidth: CGFloat { modifierColumnWidth + firstClickColumnWidth + (actionColumnWidth * 3) + 4 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -45,16 +49,15 @@ struct PreferencesView: View {
             actionsSection
         }
         .font(contentFont)
-        .padding(16)
-        .frame(minWidth: 740, idealWidth: 740, alignment: .topLeading)
+        .padding(horizontalPadding)
+        .fixedSize(horizontal: true, vertical: true)
     }
 
     private var topSection: some View {
         HStack(alignment: .top, spacing: 24) {
             appSettingsSection
-                .frame(maxWidth: .infinity, alignment: .topLeading)
             permissionsSection
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .frame(width: 220, alignment: .topLeading)
         }
     }
 
@@ -64,7 +67,6 @@ struct PreferencesView: View {
                 .font(sectionTitleFont)
             checkboxRow("Show settings on startup", isOn: $preferences.showOnStartup)
             checkboxRow("Start DockActioner at login", isOn: $preferences.startAtLogin)
-            updateFrequencyRow
             HStack(spacing: 12) {
                 Button("Check for Updates", action: updateManager.checkForUpdates)
                     .buttonStyle(.borderedProminent)
@@ -75,13 +77,15 @@ struct PreferencesView: View {
                 Button("Quit", action: { NSApp.terminate(nil) })
                     .buttonStyle(.bordered)
             }
+            updateFrequencyRow
         }
     }
 
     private var updateFrequencyRow: some View {
         HStack(spacing: 10) {
-            Text("Update check frequency")
-            Spacer()
+            Text("Check for updates:")
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             Picker("", selection: $preferences.updateCheckFrequency) {
                 ForEach(UpdateCheckFrequency.allCases) { frequency in
                     Text(frequency.displayName).tag(frequency)
@@ -126,7 +130,7 @@ struct PreferencesView: View {
                 }
             }
 
-            HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
                 permissionActionButton(
                     title: "Accessibility",
                     granted: coordinator.accessibilityGranted,
@@ -191,7 +195,9 @@ struct PreferencesView: View {
         HStack(spacing: 0) {
             tableHeaderText("Modifier", width: modifierColumnWidth)
             verticalDivider
-            tableHeaderText("Click", width: actionColumnWidth)
+            tableHeaderText("First Click", width: firstClickColumnWidth)
+            verticalDivider
+            tableHeaderText("Click after App activation", width: actionColumnWidth)
             verticalDivider
             tableHeaderText("Scroll Up", width: actionColumnWidth)
             verticalDivider
@@ -209,6 +215,8 @@ struct PreferencesView: View {
         HStack(spacing: 0) {
             tableRowLabel(modifier.title, width: modifierColumnWidth)
             verticalDivider
+            firstClickCell(for: modifier, width: firstClickColumnWidth)
+            verticalDivider
             tablePickerCell(selection: mappingBinding(source: MappingSource.click, modifier: modifier), width: actionColumnWidth)
             verticalDivider
             tablePickerCell(selection: mappingBinding(source: MappingSource.scrollUp, modifier: modifier), width: actionColumnWidth)
@@ -222,7 +230,7 @@ struct PreferencesView: View {
                     .frame(height: 1)
             }
         }
-        .frame(height: 44)
+        .frame(height: rowHeight(for: modifier))
     }
 
     private var verticalDivider: some View {
@@ -241,6 +249,7 @@ struct PreferencesView: View {
 
     private func tableRowLabel(_ title: String, width: CGFloat) -> some View {
         Text(title)
+            .lineLimit(1)
             .padding(.horizontal, 10)
             .frame(width: width, alignment: .leading)
     }
@@ -257,6 +266,59 @@ struct PreferencesView: View {
         .frame(width: width - 20, alignment: .leading)
         .padding(.horizontal, 10)
         .frame(width: width, alignment: .leading)
+    }
+
+    private func firstClickCell(for modifier: MappingModifier, width: CGFloat) -> some View {
+        Group {
+            if modifier == .none {
+                VStack(alignment: .leading, spacing: 6) {
+                    Picker("", selection: $preferences.firstClickBehavior) {
+                        ForEach(FirstClickBehavior.allCases, id: \.self) { behavior in
+                            Text(behavior.displayName).tag(behavior)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .controlSize(.regular)
+                    .frame(width: width - 20, alignment: .leading)
+
+                    if shouldShowFirstClickMultipleWindowsToggle {
+                        Toggle(">1 window only", isOn: $preferences.firstClickAppExposeRequiresMultipleWindows)
+                            .toggleStyle(.checkbox)
+                            .font(.system(size: 12))
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, shouldShowFirstClickMultipleWindowsToggle ? 6 : 0)
+            } else {
+                tablePickerCell(selection: firstClickActionBinding(for: modifier), width: width)
+            }
+        }
+        .frame(width: width, alignment: .leading)
+    }
+
+    private func rowHeight(for modifier: MappingModifier) -> CGFloat {
+        if modifier == .none && shouldShowFirstClickMultipleWindowsToggle {
+            return expandedFirstClickRowHeight
+        }
+        return rowHeight
+    }
+
+    private var shouldShowFirstClickMultipleWindowsToggle: Bool {
+        preferences.firstClickBehavior == .appExpose
+    }
+
+    private func firstClickActionBinding(for modifier: MappingModifier) -> Binding<DockAction> {
+        switch modifier {
+        case .shift:
+            return $preferences.firstClickShiftAction
+        case .option:
+            return $preferences.firstClickOptionAction
+        case .shiftOption:
+            return $preferences.firstClickShiftOptionAction
+        case .none:
+            return .constant(.none)
+        }
     }
 
     private func mappingBinding(source: MappingSource, modifier: MappingModifier) -> Binding<DockAction> {

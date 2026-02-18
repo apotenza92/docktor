@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.0.4]
+
+- Fixed first-click App Expose reliability by aligning click interception with down/up event pairs so Dock icons no longer get stuck pressed.
+- Reworked App Expose activation flow to use a single-shot trigger with activation-state coordination, removing jumpy re-entry/cancel loops.
+- Improved App Expose focus handoff so switching between apps while Expose is open correctly activates the newly selected app when exiting.
+- Added a dedicated first-click App Expose automated suite that validates both dispatch and on-screen Expose evidence across repeated iterations.
+
 ## [v0.0.3]
 
 - Added native Sparkle updater integration with an in-app "Check for Updates" flow and configurable update check frequency in Settings.

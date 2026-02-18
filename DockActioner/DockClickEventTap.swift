@@ -5,10 +5,16 @@ enum ScrollDirection {
     case down
 }
 
+enum ClickPhase {
+    case down
+    case dragged
+    case up
+}
+
 final class DockClickEventTap {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var clickHandler: ((CGPoint, Int, CGEventFlags) -> Bool)? // Returns true if event should be consumed
+    private var clickHandler: ((CGPoint, Int, CGEventFlags, ClickPhase) -> Bool)? // Returns true if event should be consumed
     private var scrollHandler: ((CGPoint, ScrollDirection, CGEventFlags) -> Bool)? // Returns true if event should be consumed
     private var anyEventHandler: ((CGEventType) -> Void)?
 
@@ -17,10 +23,14 @@ final class DockClickEventTap {
     private var continuousScrollActive = false
     private var continuousScrollConsume = false
     private var lastContinuousScrollTime: TimeInterval = 0
-    private var consumeLeftMouseUp = false
+    private var leftMouseDownPoint: CGPoint?
+    private var leftMouseDownButton: Int?
+    private var leftMouseDownFlags: CGEventFlags?
+    private var leftMouseDragExceededThreshold = false
+    private let leftMouseDragThreshold: CGFloat = 6
 
     func start(
-        clickHandler: @escaping (CGPoint, Int, CGEventFlags) -> Bool,
+        clickHandler: @escaping (CGPoint, Int, CGEventFlags, ClickPhase) -> Bool,
         scrollHandler: @escaping (CGPoint, ScrollDirection, CGEventFlags) -> Bool,
         anyEventHandler: ((CGEventType) -> Void)? = nil
     ) -> Bool {
@@ -33,8 +43,9 @@ final class DockClickEventTap {
         // Capture both mouse clicks and scroll wheel events
         let clickDownMask = (1 << CGEventType.leftMouseDown.rawValue)
         let clickUpMask = (1 << CGEventType.leftMouseUp.rawValue)
+        let clickDragMask = (1 << CGEventType.leftMouseDragged.rawValue)
         let scrollMask = (1 << CGEventType.scrollWheel.rawValue)
-        let mask = clickDownMask | clickUpMask | scrollMask
+        let mask = clickDownMask | clickUpMask | clickDragMask | scrollMask
         
         Logger.log("Attempting to create event tap.")
         guard let tap = CGEvent.tapCreate(tap: .cghidEventTap,
@@ -47,25 +58,23 @@ final class DockClickEventTap {
                                               coordinator.anyEventHandler?(type)
                                                
                                               var shouldConsume = false
-                                               switch type {
-                                               case .tapDisabledByTimeout, .tapDisabledByUserInput:
-                                                   Logger.log("DockClickEventTap: Tap disabled (\(type == .tapDisabledByTimeout ? "timeout" : "user input")); re-enabling.")
-                                                   if let tapPort = coordinator.eventTap {
-                                                       CGEvent.tapEnable(tap: tapPort, enable: true)
-                                                   }
-                                                   return Unmanaged.passUnretained(event)
-                                               case .leftMouseDown:
-                                                   shouldConsume = coordinator.didReceiveClick(event: event)
-                                                   if shouldConsume {
-                                                       coordinator.consumeLeftMouseUp = true
-                                                   }
-                                               case .leftMouseUp:
-                                                   shouldConsume = coordinator.consumeLeftMouseUp
-                                                   coordinator.consumeLeftMouseUp = false
-                                               case .scrollWheel:
-                                                   shouldConsume = coordinator.didReceiveScroll(event: event)
-                                               default:
-                                                   break
+                                              switch type {
+                                              case .tapDisabledByTimeout, .tapDisabledByUserInput:
+                                                  Logger.log("DockClickEventTap: Tap disabled (\(type == .tapDisabledByTimeout ? "timeout" : "user input")); re-enabling.")
+                                                  if let tapPort = coordinator.eventTap {
+                                                      CGEvent.tapEnable(tap: tapPort, enable: true)
+                                                  }
+                                                  return Unmanaged.passUnretained(event)
+                                              case .leftMouseDown:
+                                                  shouldConsume = coordinator.didReceiveClick(event: event, phase: .down)
+                                              case .leftMouseDragged:
+                                                  shouldConsume = coordinator.didReceiveClick(event: event, phase: .dragged)
+                                              case .leftMouseUp:
+                                                  shouldConsume = coordinator.didReceiveClick(event: event, phase: .up)
+                                              case .scrollWheel:
+                                                  shouldConsume = coordinator.didReceiveScroll(event: event)
+                                              default:
+                                                  break
                                               }
                                               
                                               // Return nil to consume the event, or the event to let it pass through
@@ -106,17 +115,59 @@ final class DockClickEventTap {
         continuousScrollActive = false
         continuousScrollConsume = false
         lastContinuousScrollTime = 0
-        consumeLeftMouseUp = false
+        leftMouseDownPoint = nil
+        leftMouseDownButton = nil
+        leftMouseDownFlags = nil
+        leftMouseDragExceededThreshold = false
     }
 
-    private func didReceiveClick(event: CGEvent) -> Bool {
+    private func didReceiveClick(event: CGEvent, phase: ClickPhase) -> Bool {
         let location = event.location
         let buttonNumber = Int(event.getIntegerValueField(.mouseEventButtonNumber))
-        let flags = event.flags
-        Logger.debug("DockClickEventTap: Raw click at \(location.x), \(location.y) (button: \(buttonNumber))")
-        let shouldConsume = clickHandler?(location, buttonNumber, flags) ?? false
-        Logger.debug("DockClickEventTap: Click consume=\(shouldConsume)")
-        return shouldConsume
+        let currentFlags = event.flags
+
+        switch phase {
+        case .down:
+            leftMouseDownPoint = location
+            leftMouseDownButton = buttonNumber
+            leftMouseDownFlags = currentFlags
+            leftMouseDragExceededThreshold = false
+            Logger.debug("DockClickEventTap: Raw click down at \(location.x), \(location.y) (button: \(buttonNumber))")
+            let shouldConsume = clickHandler?(location, buttonNumber, currentFlags, .down) ?? false
+            Logger.debug("DockClickEventTap: Click down consume=\(shouldConsume)")
+            return shouldConsume
+
+        case .dragged:
+            if let downPoint = leftMouseDownPoint, !leftMouseDragExceededThreshold {
+                let dx = location.x - downPoint.x
+                let dy = location.y - downPoint.y
+                if hypot(dx, dy) >= leftMouseDragThreshold {
+                    leftMouseDragExceededThreshold = true
+                    let downButton = leftMouseDownButton ?? buttonNumber
+                    let downFlags = leftMouseDownFlags ?? currentFlags
+                    Logger.debug("DockClickEventTap: Drag threshold exceeded (distance=\(hypot(dx, dy)))")
+                    _ = clickHandler?(location, downButton, downFlags, .dragged)
+                }
+            }
+            return false
+
+        case .up:
+            let downButton = leftMouseDownButton ?? buttonNumber
+            let downFlags = leftMouseDownFlags ?? currentFlags
+            let dragged = leftMouseDragExceededThreshold
+            Logger.debug("DockClickEventTap: Raw click up at \(location.x), \(location.y) (button: \(downButton), dragged: \(dragged))")
+            let shouldConsume = clickHandler?(location, downButton, downFlags, .up) ?? false
+            leftMouseDownPoint = nil
+            leftMouseDownButton = nil
+            leftMouseDownFlags = nil
+            leftMouseDragExceededThreshold = false
+            if dragged {
+                Logger.debug("DockClickEventTap: Suppressing consume on mouse up due to drag")
+                return false
+            }
+            Logger.debug("DockClickEventTap: Click up consume=\(shouldConsume)")
+            return shouldConsume
+        }
     }
     
     private func didReceiveScroll(event: CGEvent) -> Bool {

@@ -19,6 +19,10 @@ final class DockExposeCoordinator: ObservableObject {
     private var lastMinimizeToggleTime: [String: TimeInterval] = [:]
     private let minimizeToggleCooldown: TimeInterval = 1.0
     private let appExposeImageDiffThreshold: Double = 0.035
+    private var pendingClickContext: PendingClickContext?
+    private var pendingClickWasDragged = false
+    private var appExposeInvocationToken: UUID?
+    private var appExposeActivationObserver: NSObjectProtocol?
 
     @Published private(set) var isRunning = false
     @Published private(set) var accessibilityGranted = AXIsProcessTrusted()
@@ -41,6 +45,7 @@ final class DockExposeCoordinator: ObservableObject {
 
     @Published private(set) var functionalTestStatus: String?
     @Published private(set) var appExposeHotkeyTestStatus: String?
+    @Published private(set) var firstClickAppExposeTestStatus: String?
 
     @Published private(set) var lastActionExecuted: DockAction?
     @Published private(set) var lastActionExecutedBundle: String?
@@ -48,6 +53,31 @@ final class DockExposeCoordinator: ObservableObject {
     @Published private(set) var lastActionExecutedAt: Date?
 
     @Published private(set) var fullTestStatus: String?
+
+    private struct PendingClickContext {
+        let location: CGPoint
+        let buttonNumber: Int
+        let flags: CGEventFlags
+        let frontmostBefore: String?
+        let clickedBundle: String
+        let consumeClick: Bool
+    }
+
+    private struct FirstClickAppExposeIterationResult {
+        let passed: Bool
+        let detail: String
+    }
+
+    private struct AppExposeEvidenceResult {
+        let frontmost: String
+        let changedPixelRatio: Double?
+        let meanAbsDelta: Double?
+        let sampledPixels: Int
+        let dockSignatureDelta: Int
+        let evidence: Bool
+        let beforePath: String
+        let afterPath: String
+    }
 
     var isAppExposeShortcutConfigured: Bool {
         invoker.isDockNotificationAvailable()
@@ -87,8 +117,8 @@ final class DockExposeCoordinator: ObservableObject {
         }
         lastStartError = nil
         isRunning = eventTap.start(
-            clickHandler: { [weak self] point, button, flags in
-                return self?.handleClick(at: point, buttonNumber: button, flags: flags) ?? false
+            clickHandler: { [weak self] point, button, flags, phase in
+                return self?.handleClick(at: point, buttonNumber: button, flags: flags, phase: phase) ?? false
             },
             scrollHandler: { [weak self] point, direction, flags in
                 return self?.handleScroll(at: point, direction: direction, flags: flags) ?? false
@@ -259,6 +289,342 @@ final class DockExposeCoordinator: ObservableObject {
                     NSApp.terminate(nil)
                 }
             }
+        }
+    }
+
+    func runFirstClickAppExposeTestSuite() {
+        firstClickAppExposeTestStatus = "Running first-click App Expose test..."
+
+        Task { [weak self] in
+            guard let self else { return }
+
+            refreshPermissionsAndSecurityState()
+            guard accessibilityGranted else {
+                firstClickAppExposeTestStatus = "First-click App Expose test failed: Accessibility not granted"
+                return
+            }
+            guard inputMonitoringGranted else {
+                firstClickAppExposeTestStatus = "First-click App Expose test failed: Input Monitoring not granted"
+                return
+            }
+
+            if !isRunning {
+                startIfPossible()
+            }
+            guard isRunning else {
+                firstClickAppExposeTestStatus = "First-click App Expose test failed: event tap not running (\(lastStartError ?? "unknown error"))"
+                return
+            }
+
+            let env = ProcessInfo.processInfo.environment
+            let iterations = max(1, Int(env["DOCKACTIONER_FIRSTCLICK_APPEXPOSE_ITERATIONS"] ?? "12") ?? 12)
+            let preferredTarget = env["DOCKACTIONER_FIRSTCLICK_APPEXPOSE_TARGET"]
+
+            guard let targetBundle = await selectFirstClickAppExposeTargetBundle(preferred: preferredTarget) else {
+                firstClickAppExposeTestStatus = "First-click App Expose test failed: could not find a testable Dock icon target"
+                return
+            }
+
+            let savedFirstClickBehavior = preferences.firstClickBehavior
+            let savedFirstClickRequiresMulti = preferences.firstClickAppExposeRequiresMultipleWindows
+            defer {
+                preferences.firstClickBehavior = savedFirstClickBehavior
+                preferences.firstClickAppExposeRequiresMultipleWindows = savedFirstClickRequiresMulti
+            }
+
+            preferences.firstClickBehavior = .appExpose
+            preferences.firstClickAppExposeRequiresMultipleWindows = false
+
+            Logger.log("First-click App Expose test: target=\(targetBundle) iterations=\(iterations)")
+
+            var passes = 0
+            var failures: [String] = []
+
+            for index in 1...iterations {
+                let result = await runSingleFirstClickAppExposeIteration(index: index,
+                                                                         total: iterations,
+                                                                         targetBundle: targetBundle)
+                if result.passed {
+                    passes += 1
+                } else {
+                    failures.append("#\(index): \(result.detail)")
+                }
+            }
+
+            let summary = "First-click App Expose test: passed \(passes)/\(iterations) target=\(targetBundle)"
+            if failures.isEmpty {
+                firstClickAppExposeTestStatus = summary
+            } else {
+                firstClickAppExposeTestStatus = summary + ". Failures: " + failures.joined(separator: " | ")
+            }
+            Logger.log(firstClickAppExposeTestStatus ?? summary)
+
+            if env["DOCKACTIONER_FIRSTCLICK_APPEXPOSE_TEST"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+    }
+
+    private func runSingleFirstClickAppExposeIteration(index: Int,
+                                                       total: Int,
+                                                       targetBundle: String) async -> FirstClickAppExposeIterationResult {
+        await ensureAppRunningForFirstClickTest(bundleIdentifier: targetBundle)
+        exitAppExpose()
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        makeNonTargetAppFrontmost(targetBundle: targetBundle)
+        try? await Task.sleep(nanoseconds: 220_000_000)
+
+        guard let initialPoint = findDockIconPoint(bundleIdentifier: targetBundle) else {
+            return FirstClickAppExposeIterationResult(passed: false,
+                                                      detail: "could not locate Dock icon")
+        }
+
+        let points = firstClickAppExposeCandidatePoints(seed: initialPoint, bundleIdentifier: targetBundle)
+        if points.isEmpty {
+            return FirstClickAppExposeIterationResult(passed: false,
+                                                      detail: "no candidate click points")
+        }
+
+        let frontmostBefore = FrontmostAppTracker.frontmostBundleIdentifier() ?? "nil"
+        var dispatched = false
+        var evidence = AppExposeEvidenceResult(frontmost: "nil",
+                                               changedPixelRatio: nil,
+                                               meanAbsDelta: nil,
+                                               sampledPixels: 0,
+                                               dockSignatureDelta: 0,
+                                               evidence: false,
+                                               beforePath: "nil",
+                                               afterPath: "nil")
+        var selectedPoint: CGPoint?
+
+        for (attemptIndex, point) in points.enumerated() {
+            postSyntheticMouseMove(to: point)
+            try? await Task.sleep(nanoseconds: 90_000_000)
+
+            let hitBundle = DockHitTest.bundleIdentifierAtPoint(point) ?? "nil"
+            let baseline = lastActionExecutedAt ?? Date.distantPast
+            let beforeSnapshot = captureMainDisplaySnapshot(tag: "first-click-app-expose-before-\(index)-\(attemptIndex + 1)")
+            let dockBefore = dockWindowSignatureSnapshot()
+
+            Logger.log("First-click App Expose iteration \(index)/\(total) attempt \(attemptIndex + 1)/\(points.count): point=(\(Int(point.x)),\(Int(point.y))) hit=\(hitBundle) frontmostBefore=\(frontmostBefore)")
+
+            postSyntheticClick(at: point)
+
+            let attemptDispatched = await waitForActionDispatch(expectedAction: .appExpose,
+                                                                expectedBundle: targetBundle,
+                                                                expectedSource: "firstClick",
+                                                                baseline: baseline,
+                                                                timeout: 1.2)
+
+            let attemptEvidence = await collectAppExposeEvidence(before: beforeSnapshot,
+                                                                 dockBefore: dockBefore,
+                                                                 tagPrefix: "first-click-app-expose-\(index)-\(attemptIndex + 1)")
+
+            if attemptDispatched && attemptEvidence.evidence {
+                dispatched = true
+                evidence = attemptEvidence
+                selectedPoint = point
+                break
+            }
+
+            if attemptDispatched && !dispatched {
+                dispatched = true
+                evidence = attemptEvidence
+                selectedPoint = point
+            }
+
+            exitAppExpose()
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            makeNonTargetAppFrontmost(targetBundle: targetBundle)
+            try? await Task.sleep(nanoseconds: 150_000_000)
+        }
+
+        let passed = dispatched && evidence.evidence
+
+        let ratioText = evidence.changedPixelRatio.map { String(format: "%.4f", $0) } ?? "unknown"
+        let meanText = evidence.meanAbsDelta.map { String(format: "%.4f", $0) } ?? "unknown"
+        let selectedPointText: String
+        if let selectedPoint {
+            selectedPointText = "(\(Int(selectedPoint.x)),\(Int(selectedPoint.y)))"
+        } else {
+            selectedPointText = "nil"
+        }
+        Logger.log("First-click App Expose iteration \(index)/\(total): dispatched=\(dispatched) evidence=\(evidence.evidence) frontmostBefore=\(frontmostBefore) frontmostAfter=\(evidence.frontmost) selectedPoint=\(selectedPointText) ratio=\(ratioText) mean=\(meanText) pixels=\(evidence.sampledPixels) dockSignatureDelta=\(evidence.dockSignatureDelta) before=\(evidence.beforePath) after=\(evidence.afterPath)")
+
+        exitAppExpose()
+        try? await Task.sleep(nanoseconds: 120_000_000)
+
+        if passed {
+            return FirstClickAppExposeIterationResult(passed: true, detail: "ok")
+        }
+
+        var failureParts: [String] = []
+        if !dispatched { failureParts.append("dispatch=false") }
+        if !evidence.evidence { failureParts.append("evidence=false") }
+        failureParts.append("frontmostAfter=\(evidence.frontmost)")
+        failureParts.append("dockSignatureDelta=\(evidence.dockSignatureDelta)")
+        return FirstClickAppExposeIterationResult(passed: false,
+                                                  detail: failureParts.joined(separator: ", "))
+    }
+
+    private func firstClickAppExposeCandidatePoints(seed: CGPoint, bundleIdentifier: String) -> [CGPoint] {
+        var points: [CGPoint] = []
+        if let live = firstClickAppExposeLiveDockPoint(for: bundleIdentifier, around: seed) {
+            points.append(live)
+        }
+
+        let offsets: [CGPoint] = [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: -6, y: 0), CGPoint(x: 6, y: 0),
+            CGPoint(x: 0, y: -6), CGPoint(x: 0, y: 6),
+            CGPoint(x: -12, y: -4), CGPoint(x: 12, y: -4),
+            CGPoint(x: -18, y: 0), CGPoint(x: 18, y: 0)
+        ]
+
+        for offset in offsets {
+            let point = CGPoint(x: seed.x + offset.x, y: seed.y + offset.y)
+            if points.contains(where: { $0 == point }) {
+                continue
+            }
+
+            if let hit = DockHitTest.bundleIdentifierAtPoint(point), hit == bundleIdentifier {
+                points.append(point)
+            }
+        }
+
+        if points.isEmpty {
+            points.append(seed)
+        }
+
+        return points
+    }
+
+    private func firstClickAppExposeLiveDockPoint(for bundleIdentifier: String, around seed: CGPoint) -> CGPoint? {
+        if let hit = DockHitTest.bundleIdentifierAtPoint(seed), hit == bundleIdentifier {
+            return seed
+        }
+
+        let deltas: [CGFloat] = [0, -8, 8, -16, 16, -24, 24]
+        for dy in deltas {
+            for dx in deltas {
+                let point = CGPoint(x: seed.x + dx, y: seed.y + dy)
+                if let hit = DockHitTest.bundleIdentifierAtPoint(point), hit == bundleIdentifier {
+                    return point
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func collectAppExposeEvidence(before: DisplaySnapshot?,
+                                          dockBefore: Set<DockWindowSignature>,
+                                          tagPrefix: String) async -> AppExposeEvidenceResult {
+        var bestMetrics: ImageDiffMetrics?
+        var bestSnapshot: DisplaySnapshot?
+        var maxDockSignatureDelta = 0
+
+        let sampleDelays: [UInt64] = [220_000_000, 420_000_000, 680_000_000]
+        for (index, delay) in sampleDelays.enumerated() {
+            try? await Task.sleep(nanoseconds: delay)
+            let after = captureMainDisplaySnapshot(tag: "\(tagPrefix)-after-\(index + 1)")
+            if let after,
+               let before,
+               let metrics = imageDiffMetrics(before: before.image, after: after.image) {
+                if bestMetrics == nil || metrics.changedPixelRatio > (bestMetrics?.changedPixelRatio ?? 0) {
+                    bestMetrics = metrics
+                    bestSnapshot = after
+                }
+            }
+
+            let dockAfter = dockWindowSignatureSnapshot()
+            let delta = dockBefore.symmetricDifference(dockAfter).count
+            if delta > maxDockSignatureDelta {
+                maxDockSignatureDelta = delta
+            }
+        }
+
+        let frontmost = FrontmostAppTracker.frontmostBundleIdentifier() ?? "nil"
+        let evidence = maxDockSignatureDelta > 0 || frontmost == "com.apple.dock"
+
+        return AppExposeEvidenceResult(frontmost: frontmost,
+                                       changedPixelRatio: bestMetrics?.changedPixelRatio,
+                                       meanAbsDelta: bestMetrics?.meanAbsDelta,
+                                       sampledPixels: bestMetrics?.sampledPixels ?? 0,
+                                       dockSignatureDelta: maxDockSignatureDelta,
+                                       evidence: evidence,
+                                       beforePath: before?.url?.path ?? "nil",
+                                       afterPath: bestSnapshot?.url?.path ?? "nil")
+    }
+
+    private func waitForActionDispatch(expectedAction: DockAction,
+                                       expectedBundle: String,
+                                       expectedSource: String,
+                                       baseline: Date,
+                                       timeout: TimeInterval) async -> Bool {
+        let started = Date()
+        while Date().timeIntervalSince(started) < timeout {
+            if let at = lastActionExecutedAt,
+               at > baseline,
+               lastActionExecuted == expectedAction,
+               lastActionExecutedBundle == expectedBundle,
+               lastActionExecutedSource == expectedSource {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 40_000_000)
+        }
+        return false
+    }
+
+    private func selectFirstClickAppExposeTargetBundle(preferred: String?) async -> String? {
+        var candidates: [String] = []
+        if let preferred, !preferred.isEmpty {
+            candidates.append(preferred)
+        }
+        candidates.append(contentsOf: [
+            "com.apple.calculator",
+            "com.apple.TextEdit",
+            "com.apple.Preview",
+            "com.apple.Notes"
+        ])
+
+        var seen = Set<String>()
+        let ordered = candidates.filter { seen.insert($0).inserted }
+
+        for bundle in ordered {
+            await ensureAppRunningForFirstClickTest(bundleIdentifier: bundle)
+            if findDockIconPoint(bundleIdentifier: bundle) != nil {
+                return bundle
+            }
+        }
+
+        return nil
+    }
+
+    private func ensureAppRunningForFirstClickTest(bundleIdentifier: String) async {
+        if NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == bundleIdentifier }) {
+            return
+        }
+        launchApp(bundleIdentifier: bundleIdentifier)
+        try? await Task.sleep(nanoseconds: 650_000_000)
+    }
+
+    private func makeNonTargetAppFrontmost(targetBundle: String) {
+        let selfBundle = Bundle.main.bundleIdentifier
+
+        if let finder = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.apple.finder" }) {
+            _ = finder.activate(options: [.activateIgnoringOtherApps])
+            return
+        }
+
+        if let fallback = NSWorkspace.shared.runningApplications.first(where: {
+            $0.activationPolicy == .regular
+                && $0.bundleIdentifier != targetBundle
+                && $0.bundleIdentifier != selfBundle
+        }) {
+            _ = fallback.activate(options: [.activateIgnoringOtherApps])
         }
     }
 
@@ -777,31 +1143,91 @@ final class DockExposeCoordinator: ObservableObject {
         }
     }
 
-    private func handleClick(at location: CGPoint, buttonNumber: Int, flags: CGEventFlags) -> Bool {
+    private func handleClick(at location: CGPoint, buttonNumber: Int, flags: CGEventFlags, phase: ClickPhase) -> Bool {
         if selfTestActive {
             if let bundle = DockHitTest.bundleIdentifierAtPoint(location) {
                 lastDockBundleHit = bundle
                 lastDockBundleHitAt = Date()
-                return true
             }
-            return true
+            return phase != .dragged
         }
 
-        Logger.debug("WORKFLOW: Click received at \(location.x), \(location.y) button \(buttonNumber)")
         guard buttonNumber == 0 else {
+            if phase == .up {
+                pendingClickContext = nil
+                pendingClickWasDragged = false
+            }
             Logger.debug("WORKFLOW: Non-primary mouse button \(buttonNumber) - allowing through")
             return false
         }
 
-        let frontmostBefore = FrontmostAppTracker.frontmostBundleIdentifier()
-        guard let clickedBundle = DockHitTest.bundleIdentifierAtPoint(location) else {
-            return false
-        }
+        switch phase {
+        case .down:
+            Logger.debug("WORKFLOW: Click down at \(location.x), \(location.y) button \(buttonNumber)")
+            guard let clickedBundle = DockHitTest.bundleIdentifierAtPoint(location) else {
+                pendingClickContext = nil
+                pendingClickWasDragged = false
+                return false
+            }
 
-        if diagnosticsCaptureActive {
-            lastDockBundleHit = clickedBundle
-            lastDockBundleHitAt = Date()
+            if diagnosticsCaptureActive {
+                lastDockBundleHit = clickedBundle
+                lastDockBundleHitAt = Date()
+            }
+
+            let context = PendingClickContext(location: location,
+                                              buttonNumber: buttonNumber,
+                                              flags: flags,
+                                              frontmostBefore: FrontmostAppTracker.frontmostBundleIdentifier(),
+                                              clickedBundle: clickedBundle,
+                                              consumeClick: false)
+            let consumeClick = shouldConsumeClick(for: context)
+            pendingClickContext = PendingClickContext(location: context.location,
+                                                     buttonNumber: context.buttonNumber,
+                                                     flags: context.flags,
+                                                     frontmostBefore: context.frontmostBefore,
+                                                     clickedBundle: context.clickedBundle,
+                                                     consumeClick: consumeClick)
+            pendingClickWasDragged = false
+            return consumeClick
+
+        case .dragged:
+            if let context = pendingClickContext {
+                pendingClickWasDragged = true
+                Logger.debug("WORKFLOW: Click became drag; suppressing click action")
+                return context.consumeClick
+            }
+            return false
+
+        case .up:
+            guard let context = pendingClickContext else {
+                return false
+            }
+
+            defer {
+                pendingClickContext = nil
+                pendingClickWasDragged = false
+            }
+
+            if pendingClickWasDragged {
+                Logger.debug("WORKFLOW: Drag completed; allowing Dock drop behavior")
+                return context.consumeClick
+            }
+
+            let consumeNow = executeClickAction(context)
+            if consumeNow != context.consumeClick {
+                Logger.debug("WORKFLOW: Click consume mismatch planned=\(context.consumeClick) actual=\(consumeNow)")
+            }
+            return context.consumeClick
         }
+    }
+
+    private func executeClickAction(_ context: PendingClickContext) -> Bool {
+        let location = context.location
+        let buttonNumber = context.buttonNumber
+        let flags = context.flags
+        let frontmostBefore = context.frontmostBefore
+        let clickedBundle = context.clickedBundle
 
         Logger.debug("WORKFLOW: frontmost=\(frontmostBefore ?? "nil"), clicked=\(clickedBundle), lastTriggered=\(lastTriggeredBundle ?? "nil"), currentExpose=\(currentExposeApp ?? "nil")")
 
@@ -822,9 +1248,10 @@ final class DockExposeCoordinator: ObservableObject {
                 return true
             }
 
-            Logger.debug("WORKFLOW: Deactivate click on currentExposeApp (\(clickedBundle)); passing through to Dock")
-            resetExposeTracking()
-            return false
+            Logger.debug("WORKFLOW: Deactivate click on currentExposeApp (\(clickedBundle)); exiting App Exposé and activating app")
+            exitAppExpose()
+            _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: clickedBundle)
+            return true
         }
 
         if frontmostBefore != clickedBundle {
@@ -841,10 +1268,10 @@ final class DockExposeCoordinator: ObservableObject {
                 Logger.debug("WORKFLOW: Updated currentExposeApp=\(clickedBundle)")
                 return false
             } else {
-                Logger.debug("WORKFLOW: Different app clicked (allowing Dock activation)")
+                Logger.debug("WORKFLOW: Different app clicked; evaluating first-click behavior")
                 currentExposeApp = nil
                 appsWithoutWindowsInExpose.removeAll()
-                return false
+                return executeFirstClickAction(for: clickedBundle, flags: flags, frontmostBefore: frontmostBefore)
             }
         }
 
@@ -859,11 +1286,13 @@ final class DockExposeCoordinator: ObservableObject {
         lastActionExecutedBundle = clickedBundle
         lastActionExecutedSource = "click"
         lastActionExecutedAt = Date()
-        Logger.log("WORKFLOW: Executing click action (button \(buttonNumber)): \(action.rawValue) for \(clickedBundle) (modifiers=\(modifierCombination(from: flags).rawValue), flags=\(flags.rawValue))")
+        Logger.log("WORKFLOW: Executing click action (button \(buttonNumber)) at \(location.x), \(location.y): \(action.rawValue) for \(clickedBundle) (modifiers=\(modifierCombination(from: flags).rawValue), flags=\(flags.rawValue))")
 
         switch action {
         case .none:
             return false
+        case .activateApp:
+            return performActivateAppAction(bundleIdentifier: clickedBundle)
         case .hideApp:
             if WindowManager.isAppHidden(bundleIdentifier: clickedBundle) {
                 _ = WindowManager.unhideApp(bundleIdentifier: clickedBundle)
@@ -971,6 +1400,8 @@ final class DockExposeCoordinator: ObservableObject {
         switch action {
         case .none:
             return false
+        case .activateApp:
+            return performActivateAppAction(bundleIdentifier: clickedBundle)
         case .hideApp:
             if WindowManager.isAppHidden(bundleIdentifier: clickedBundle) {
                 _ = WindowManager.unhideApp(bundleIdentifier: clickedBundle)
@@ -1089,10 +1520,267 @@ final class DockExposeCoordinator: ObservableObject {
         }
     }
 
+    private func executeFirstClickBehavior(for bundleIdentifier: String) -> Bool {
+        switch preferences.firstClickBehavior {
+        case .activateApp:
+            Logger.debug("WORKFLOW: First click behavior=activateApp; allowing Dock activation")
+            return false
+        case .bringAllToFront:
+            guard NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == bundleIdentifier }) else {
+                Logger.debug("WORKFLOW: First click behavior=bringAllToFront but app not running; allowing Dock launch")
+                return false
+            }
+            if WindowManager.isAppHidden(bundleIdentifier: bundleIdentifier) {
+                _ = WindowManager.unhideApp(bundleIdentifier: bundleIdentifier)
+            }
+            if !WindowManager.bringAllToFront(bundleIdentifier: bundleIdentifier) {
+                _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: bundleIdentifier)
+            }
+            Logger.debug("WORKFLOW: First click behavior=bringAllToFront executed for \(bundleIdentifier)")
+            return true
+        case .appExpose:
+            guard NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == bundleIdentifier }) else {
+                Logger.debug("WORKFLOW: First click behavior=appExpose but app not running; allowing Dock launch")
+                return false
+            }
+            if preferences.firstClickAppExposeRequiresMultipleWindows,
+               !WindowManager.hasMultipleWindowsOpen(bundleIdentifier: bundleIdentifier) {
+                Logger.debug("WORKFLOW: First click appExpose skipped for \(bundleIdentifier): fewer than two windows")
+                return false
+            }
+            lastActionExecuted = .appExpose
+            lastActionExecutedBundle = bundleIdentifier
+            lastActionExecutedSource = "firstClick"
+            lastActionExecutedAt = Date()
+            Logger.debug("WORKFLOW: First click behavior=appExpose executed for \(bundleIdentifier)")
+            triggerAppExpose(for: bundleIdentifier)
+            return true
+        }
+    }
+
+    private func executeFirstClickAction(for bundleIdentifier: String,
+                                         flags: CGEventFlags,
+                                         frontmostBefore: String?) -> Bool {
+        let modifier = modifierCombination(from: flags)
+
+        if modifier == .none {
+            return executeFirstClickBehavior(for: bundleIdentifier)
+        }
+
+        let isRunning = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundleIdentifier }
+        if !isRunning {
+            Logger.debug("WORKFLOW: First click modifier action requested but app not running; allowing Dock launch")
+            return false
+        }
+
+        let action: DockAction
+        switch modifier {
+        case .shift:
+            action = preferences.firstClickShiftAction
+        case .option:
+            action = preferences.firstClickOptionAction
+        case .shiftOption:
+            action = preferences.firstClickShiftOptionAction
+        case .none:
+            action = .none
+        }
+
+        if action == .appExpose,
+           preferences.firstClickAppExposeRequiresMultipleWindows,
+           !WindowManager.hasMultipleWindowsOpen(bundleIdentifier: bundleIdentifier) {
+            Logger.debug("WORKFLOW: First click modifier appExpose skipped for \(bundleIdentifier): fewer than two windows")
+            return false
+        }
+
+        if action == .none {
+            Logger.debug("WORKFLOW: First click modifier action is none; allowing Dock activation")
+            return false
+        }
+
+        lastActionExecuted = action
+        lastActionExecutedBundle = bundleIdentifier
+        lastActionExecutedSource = "firstClick"
+        lastActionExecutedAt = Date()
+        Logger.log("WORKFLOW: Executing first-click modifier action: \(action.rawValue) for \(bundleIdentifier) (modifier=\(modifier.rawValue), flags=\(flags.rawValue))")
+
+        switch action {
+        case .none:
+            return false
+        case .activateApp:
+            return performActivateAppAction(bundleIdentifier: bundleIdentifier)
+        case .hideApp:
+            if WindowManager.isAppHidden(bundleIdentifier: bundleIdentifier) {
+                _ = WindowManager.unhideApp(bundleIdentifier: bundleIdentifier)
+                _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: bundleIdentifier)
+            } else {
+                _ = WindowManager.hideAllWindows(bundleIdentifier: bundleIdentifier)
+            }
+            resetExposeTracking()
+            return true
+        case .hideOthers:
+            if WindowManager.anyHiddenOthers(excluding: bundleIdentifier) {
+                _ = WindowManager.showAllApplications()
+            } else {
+                _ = WindowManager.hideOthers(bundleIdentifier: bundleIdentifier)
+            }
+            resetExposeTracking()
+            return true
+        case .bringAllToFront:
+            if WindowManager.isAppHidden(bundleIdentifier: bundleIdentifier) {
+                _ = WindowManager.unhideApp(bundleIdentifier: bundleIdentifier)
+            }
+            _ = WindowManager.bringAllToFront(bundleIdentifier: bundleIdentifier)
+            resetExposeTracking()
+            return true
+        case .appExpose:
+            Logger.debug("WORKFLOW: App Exposé trigger from first-click modifier")
+            triggerAppExpose(for: bundleIdentifier)
+            return true
+        case .singleAppMode:
+            performSingleAppMode(targetBundleIdentifier: bundleIdentifier, frontmostBefore: frontmostBefore)
+            return true
+        case .minimizeAll:
+            if shouldThrottleMinimize(bundleIdentifier: bundleIdentifier) {
+                Logger.debug("WORKFLOW: Minimize throttle active for \(bundleIdentifier); ignoring first-click modifier")
+                return true
+            }
+            markMinimize(bundleIdentifier: bundleIdentifier)
+            if WindowManager.allWindowsMinimized(bundleIdentifier: bundleIdentifier) {
+                if WindowManager.restoreAllWindows(bundleIdentifier: bundleIdentifier) {
+                    _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: bundleIdentifier)
+                }
+            } else {
+                _ = WindowManager.minimizeAllWindows(bundleIdentifier: bundleIdentifier)
+            }
+            return true
+        case .quitApp:
+            _ = WindowManager.quitApp(bundleIdentifier: bundleIdentifier)
+            return true
+        @unknown default:
+            return false
+        }
+    }
+
     private func resetExposeTracking() {
+        clearAppExposeActivationObserver()
+        appExposeInvocationToken = nil
         lastTriggeredBundle = nil
         currentExposeApp = nil
         appsWithoutWindowsInExpose.removeAll()
+    }
+
+    private func clearAppExposeActivationObserver() {
+        if let observer = appExposeActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            appExposeActivationObserver = nil
+        }
+    }
+
+    private func completeAppExposeInvocation(token: UUID,
+                                             bundleIdentifier: String,
+                                             reason: String,
+                                             frontmost: String?,
+                                             startedAt: Date) {
+        guard appExposeInvocationToken == token else { return }
+
+        appExposeInvocationToken = nil
+        clearAppExposeActivationObserver()
+
+        invoker.invokeApplicationWindows(for: bundleIdentifier)
+        lastTriggeredBundle = bundleIdentifier
+        currentExposeApp = bundleIdentifier
+
+        let latencyMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+        let frontmostText = frontmost ?? "nil"
+        Logger.debug("WORKFLOW: App Exposé trigger reason=\(reason) target=\(bundleIdentifier) frontmost=\(frontmostText) latencyMs=\(latencyMs)")
+    }
+
+    private func shouldConsumeClick(for context: PendingClickContext) -> Bool {
+        let frontmostBefore = context.frontmostBefore
+        let clickedBundle = context.clickedBundle
+        let flags = context.flags
+
+        let isRunning = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == clickedBundle }
+        if !isRunning && lastTriggeredBundle != nil {
+            return true
+        }
+
+        if let currentApp = currentExposeApp, currentApp == clickedBundle, lastTriggeredBundle != nil {
+            return true
+        }
+
+        if frontmostBefore != clickedBundle {
+            if lastTriggeredBundle != nil {
+                return false
+            }
+            return shouldConsumeFirstClickAction(for: clickedBundle, flags: flags)
+        }
+
+        if let lastBundle = lastTriggeredBundle, lastBundle == clickedBundle {
+            return false
+        }
+
+        return configuredAction(for: .click, flags: flags) != .none
+    }
+
+    private func shouldConsumeFirstClickAction(for bundleIdentifier: String, flags: CGEventFlags) -> Bool {
+        let modifier = modifierCombination(from: flags)
+        let isRunning = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundleIdentifier }
+
+        if modifier == .none {
+            switch preferences.firstClickBehavior {
+            case .activateApp:
+                return false
+            case .bringAllToFront:
+                return isRunning
+            case .appExpose:
+                guard isRunning else { return false }
+                if preferences.firstClickAppExposeRequiresMultipleWindows,
+                   !WindowManager.hasMultipleWindowsOpen(bundleIdentifier: bundleIdentifier) {
+                    return false
+                }
+                return true
+            }
+        }
+
+        guard isRunning else { return false }
+
+        let action: DockAction
+        switch modifier {
+        case .shift:
+            action = preferences.firstClickShiftAction
+        case .option:
+            action = preferences.firstClickOptionAction
+        case .shiftOption:
+            action = preferences.firstClickShiftOptionAction
+        case .none:
+            action = .none
+        }
+
+        if action == .appExpose,
+           preferences.firstClickAppExposeRequiresMultipleWindows,
+           !WindowManager.hasMultipleWindowsOpen(bundleIdentifier: bundleIdentifier) {
+            return false
+        }
+
+        return action != .none
+    }
+
+    private func performActivateAppAction(bundleIdentifier: String) -> Bool {
+        let isRunning = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundleIdentifier }
+        if !isRunning {
+            launchApp(bundleIdentifier: bundleIdentifier)
+            resetExposeTracking()
+            return true
+        }
+
+        if WindowManager.isAppHidden(bundleIdentifier: bundleIdentifier) {
+            _ = WindowManager.unhideApp(bundleIdentifier: bundleIdentifier)
+        }
+
+        _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: bundleIdentifier)
+        resetExposeTracking()
+        return true
     }
 
     private func performSingleAppMode(targetBundleIdentifier: String, frontmostBefore: String?) {
@@ -1135,39 +1823,82 @@ final class DockExposeCoordinator: ObservableObject {
 
     private func triggerAppExpose(for bundleIdentifier: String) {
         Logger.debug("WORKFLOW: Triggering App Exposé for \(bundleIdentifier)")
-        
-        // Activate the app first if it's not frontmost.
+
+        clearAppExposeActivationObserver()
+        let invocationToken = UUID()
+        appExposeInvocationToken = invocationToken
+        let startedAt = Date()
+
         let frontmost = FrontmostAppTracker.frontmostBundleIdentifier()
         let needsActivation = frontmost != bundleIdentifier
-        if needsActivation {
-            if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleIdentifier }) {
-                _ = app.activate(options: [.activateIgnoringOtherApps])
-            }
+        if !needsActivation {
+            completeAppExposeInvocation(token: invocationToken,
+                                        bundleIdentifier: bundleIdentifier,
+                                        reason: "already-frontmost",
+                                        frontmost: frontmost,
+                                        startedAt: startedAt)
+            return
         }
-        
-        let fire: @Sendable () -> Void = {
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                invoker.invokeApplicationWindows(for: bundleIdentifier)
-                lastTriggeredBundle = bundleIdentifier
-                currentExposeApp = bundleIdentifier
-                Logger.debug("WORKFLOW: App Exposé triggered for \(bundleIdentifier) (frontmost=\(FrontmostAppTracker.frontmostBundleIdentifier() ?? "nil"))")
-            }
-        }
-        
-        // Immediate fire for responsiveness.
-        fire()
 
-        // If activation was needed, schedule a few quick retries to ride out activation latency.
-        if needsActivation {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: fire)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16, execute: fire)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28, execute: fire)
+        appExposeActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            let activatedBundle = app?.bundleIdentifier
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                guard self.appExposeInvocationToken == invocationToken else { return }
+
+                if activatedBundle == bundleIdentifier {
+                    self.completeAppExposeInvocation(token: invocationToken,
+                                                    bundleIdentifier: bundleIdentifier,
+                                                    reason: "activation-notification",
+                                                    frontmost: FrontmostAppTracker.frontmostBundleIdentifier(),
+                                                    startedAt: startedAt)
+                }
+            }
+        }
+
+        if !WindowManager.activateAndShowMainWindow(bundleIdentifier: bundleIdentifier),
+           let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleIdentifier }) {
+            _ = app.activate(options: [])
+        }
+
+        let maxChecks = 20
+        let checkDelay: TimeInterval = 0.025
+        for attempt in 1...maxChecks {
+            let delay = checkDelay * Double(attempt)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                guard self.appExposeInvocationToken == invocationToken else { return }
+
+                let currentFrontmost = FrontmostAppTracker.frontmostBundleIdentifier()
+                if currentFrontmost == bundleIdentifier {
+                    self.completeAppExposeInvocation(token: invocationToken,
+                                                    bundleIdentifier: bundleIdentifier,
+                                                    reason: "poll-ready-\(attempt)",
+                                                    frontmost: currentFrontmost,
+                                                    startedAt: startedAt)
+                    return
+                }
+
+                if attempt == maxChecks {
+                    self.completeAppExposeInvocation(token: invocationToken,
+                                                    bundleIdentifier: bundleIdentifier,
+                                                    reason: "poll-timeout",
+                                                    frontmost: currentFrontmost,
+                                                    startedAt: startedAt)
+                }
+            }
         }
     }
     
     private func exitAppExpose() {
         Logger.debug("WORKFLOW: Exiting App Exposé via Escape")
+        clearAppExposeActivationObserver()
+        appExposeInvocationToken = nil
         // Send Escape key to close App Exposé
         if let source = CGEventSource(stateID: .combinedSessionState) {
             let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 53, keyDown: true)

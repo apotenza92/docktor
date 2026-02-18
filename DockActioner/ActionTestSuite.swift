@@ -186,6 +186,9 @@ final class ActionTestSuite {
         switch action {
         case .none:
             return (true, "No action configured (pass-through)")
+        case .activateApp:
+            let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            return (front == targetBundleIdentifier, "Frontmost=\(front ?? "nil")")
         case .hideApp:
             let hidden = WindowManager.isAppHidden(bundleIdentifier: targetBundleIdentifier)
             return (hidden, hidden ? "Target app hidden" : "Target app not hidden")

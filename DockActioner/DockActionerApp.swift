@@ -17,7 +17,6 @@ struct DockActionerApp: App {
         Settings {
             PreferencesView(coordinator: DockExposeCoordinator.shared,
                             updateManager: updateManager)
-                .frame(minWidth: 740, idealWidth: 740)
         }
     }
 }

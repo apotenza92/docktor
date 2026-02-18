@@ -200,6 +200,26 @@ enum WindowManager {
         
         return false
     }
+
+    /// Count all AX windows currently reported by the application.
+    static func totalWindowCount(bundleIdentifier: String) -> Int {
+        guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleIdentifier }) else {
+            return 0
+        }
+
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        var windows: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windows)
+        guard result == .success, let windowsArray = windows as? [AXUIElement] else {
+            return 0
+        }
+        return windowsArray.count
+    }
+
+    /// True when the app currently reports at least two windows.
+    static func hasMultipleWindowsOpen(bundleIdentifier: String) -> Bool {
+        totalWindowCount(bundleIdentifier: bundleIdentifier) >= 2
+    }
     
     /// Get the main window of an app
     static func getMainWindow(bundleIdentifier: String) -> AXUIElement? {
