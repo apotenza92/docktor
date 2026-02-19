@@ -15,10 +15,10 @@
 - Hardened Dock click targeting in cartesian runs with cached/revalidated icon points and per-click down/up bundle probes to distinguish hit-test misses from trigger failures.
 - Fixed negative-space cancel tracking reset so consumed/non-Dock clicks clear App Expose tracking state correctly and reduce stuck cancel flows.
 - Added recovery for consumed click-up paths by posting passthrough synthetic mouse-up events, reducing Dock icons getting visually stuck in a pressed/greyed state.]]></description>
-      <pubDate>Thu, 19 Feb 2026 05:26:57 +0000</pubDate>
+      <pubDate>Thu, 19 Feb 2026 08:52:43 +0000</pubDate>
       <enclosure url="https://github.com/apotenza92/dock-actioner/releases/download/v0.0.8/DockActioner-Beta-v0.0.8-macos-x64.zip"
-                 sparkle:edSignature="jCesEaFoBTzNFe6OXb7x5LwfF4bev5GS1IoHM4DD+Oho/oeirffwC6LJOG+oznSp3v1z+6QuqOQa9QrV4MUIAA=="
-                 length="2826851"
+                 sparkle:edSignature="nADJc3H8yPqzamoHnCNHLknvJ6XbErsdxTLufmGmwaafCETw6JSgIUVfEko7s7iZ9ZcolwaL5ded1IfD8s6cCg=="
+                 length="2826937"
                  type="application/octet-stream" />
     </item>
   </channel>
