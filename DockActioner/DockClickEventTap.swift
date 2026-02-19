@@ -12,6 +12,9 @@ enum ClickPhase {
 }
 
 final class DockClickEventTap {
+    static let syntheticClickUserData: Int64 = 0xD0C0A11
+    static let syntheticReleasePassthroughUserData: Int64 = 0xD0C0A12
+
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var clickHandler: ((CGPoint, Int, CGEventFlags, ClickPhase) -> Bool)? // Returns true if event should be consumed
@@ -122,6 +125,12 @@ final class DockClickEventTap {
     }
 
     private func didReceiveClick(event: CGEvent, phase: ClickPhase) -> Bool {
+        let sourceUserData = event.getIntegerValueField(.eventSourceUserData)
+        if sourceUserData == DockClickEventTap.syntheticReleasePassthroughUserData {
+            Logger.debug("DockClickEventTap: Passthrough synthetic release event")
+            return false
+        }
+
         let location = event.location
         let buttonNumber = Int(event.getIntegerValueField(.mouseEventButtonNumber))
         let currentFlags = event.flags

@@ -23,6 +23,8 @@ final class DockExposeCoordinator: ObservableObject {
     private var pendingClickWasDragged = false
     private var appExposeInvocationToken: UUID?
     private var appExposeActivationObserver: NSObjectProtocol?
+    private var cartesianDockPointCache: [String: CGPoint] = [:]
+    private var cartesianClickProbe: CartesianClickProbe?
 
     @Published private(set) var isRunning = false
     @Published private(set) var accessibilityGranted = AXIsProcessTrusted()
@@ -47,6 +49,7 @@ final class DockExposeCoordinator: ObservableObject {
     @Published private(set) var appExposeHotkeyTestStatus: String?
     @Published private(set) var firstClickAppExposeTestStatus: String?
     @Published private(set) var appExposeReentryTestStatus: String?
+    @Published private(set) var appExposeCartesianTestStatus: String?
 
     @Published private(set) var lastActionExecuted: DockAction?
     @Published private(set) var lastActionExecutedBundle: String?
@@ -83,6 +86,230 @@ final class DockExposeCoordinator: ObservableObject {
         let evidence: Bool
         let beforePath: String
         let afterPath: String
+    }
+
+    private enum ScenarioWindowState: String, CaseIterable, Codable {
+        case zeroWindows = "0_windows"
+        case oneWindow = "1_window"
+        case twoPlusWindows = "2plus_windows"
+        case twoPlusHiddenWindows = "2plus_hidden_windows"
+        case twoPlusMinimizedWindows = "2plus_minimized_windows"
+    }
+
+    private enum ScenarioFocusState: String, CaseIterable, Codable {
+        case targetFrontmost = "target_frontmost"
+        case otherAppFrontmost = "other_app_frontmost"
+        case targetHidden = "target_hidden"
+    }
+
+    private enum ScenarioInExposeAction: String, CaseIterable, Codable {
+        case selectTargetWindow = "select_target_window"
+        case clickNegativeSpace = "click_negative_space"
+        case pressEscape = "press_escape"
+        case clickSameAppDockIcon = "click_same_app_dock_icon"
+        case clickOtherAppDockIcon = "click_other_app_dock_icon"
+        case cmdTabOtherApp = "cmd_tab_other_app"
+        case noInputTimeout3s = "no_input_timeout_3s"
+    }
+
+    private enum ScenarioPostExitAction: String, CaseIterable, Codable {
+        case clickSameAppIcon = "click_same_app_icon"
+        case clickOtherAppIcon = "click_other_app_icon"
+        case clickTargetWindow = "click_target_window"
+        case reenterAppExposeSameApp = "reenter_app_expose_same_app"
+        case reenterAppExposeAfterSwitch = "reenter_app_expose_after_switch"
+    }
+
+    private enum ScenarioReentryDepth: String, CaseIterable, Codable {
+        case single = "single"
+        case doubleImmediate = "double_immediate"
+        case tripleAlternating = "triple_alternating"
+    }
+
+    private enum ScenarioStep: String, Codable {
+        case prepareWindowState = "prepare_window_state"
+        case primeFocusState = "prime_focus_state"
+        case triggerFirstClick = "trigger_first_click"
+        case performInExposeAction = "perform_in_expose_action"
+        case performPostExitAction = "perform_post_exit_action"
+        case validateReentry = "validate_reentry"
+        case probeDockResponsiveness = "probe_dock_responsiveness"
+        case validateStateConsistency = "validate_state_consistency"
+        case finalize = "finalize"
+    }
+
+    private enum ScenarioFailureBucket: String, Codable {
+        case triggerMissed = "trigger_missed"
+        case exitStuck = "exit_stuck"
+        case dockUnresponsive = "dock_unresponsive"
+        case reentryBroken = "reentry_broken"
+        case wrongTargetWindow = "wrong_target_window"
+    }
+
+    private struct ScenarioOracle: Codable {
+        let expectedTrigger: Bool
+        let responsivenessWarnMs: Double
+        let responsivenessHardFailMs: Double
+        let requiresStateResetAfterCancel: Bool
+    }
+
+    private struct AppExposeScenario: Codable {
+        let id: String
+        let family: String
+        let targetBundle: String
+        let requiresMultipleWindows: Bool
+        let windowState: ScenarioWindowState
+        let focusState: ScenarioFocusState
+        let inExposeAction: ScenarioInExposeAction
+        let postExitAction: ScenarioPostExitAction
+        let reentryDepth: ScenarioReentryDepth
+    }
+
+    private struct ScenarioWindowPreparation: Codable {
+        let requested: ScenarioWindowState
+        let observedTotalWindows: Int
+        let observedHidden: Bool
+        let observedAllMinimized: Bool
+        let achieved: Bool
+        let detail: String
+    }
+
+    private struct AppExposeScenarioResult: Codable {
+        let scenario: AppExposeScenario
+        let phase: String
+        let runIndex: Int
+        let startedAt: String
+        let finishedAt: String
+        let passed: Bool
+        let failureBucket: ScenarioFailureBucket?
+        let oracle: ScenarioOracle
+        let triggered: Bool
+        let inExposeExitOK: Bool
+        let reentryOK: Bool
+        let stateConsistencyOK: Bool
+        let setupOK: Bool
+        let dockResponseLatencyMs: Double?
+        let frontmostBefore: String
+        let frontmostAfter: String
+        let stepTrace: [ScenarioStep]
+        let setup: ScenarioWindowPreparation
+        let details: String
+    }
+
+    private struct AppExposeFailureRecord: Codable {
+        let scenarioID: String
+        let targetBundle: String
+        let phase: String
+        let runIndex: Int
+        let tuple: String
+        let family: String
+        let bucket: String
+        let details: String
+    }
+
+    private struct ScenarioHistory {
+        let scenario: AppExposeScenario
+        var runs: Int
+        var failures: Int
+        var failureSamples: [String]
+    }
+
+    private struct ScenarioActionOutcome {
+        let ok: Bool
+        let detail: String
+    }
+
+    private struct CartesianClickProbe {
+        let token: UUID
+        let expectedBundle: String
+        let startedAt: Date
+        var observedDownBundle: String?
+        var observedDownAt: Date?
+        var observedUpBundle: String?
+        var observedUpAt: Date?
+    }
+
+    private struct CartesianClickDispatchResult {
+        let sent: Bool
+        let expectedBundle: String
+        let clickPoint: CGPoint?
+        let observedDownBundle: String?
+        let observedUpBundle: String?
+        let observedDownMs: Double?
+        let observedUpMs: Double?
+        let mode: String
+
+        var summary: String {
+            let pointText: String
+            if let clickPoint {
+                pointText = "(\(Int(clickPoint.x)),\(Int(clickPoint.y)))"
+            } else {
+                pointText = "nil"
+            }
+
+            let downText = observedDownBundle ?? "nil"
+            let upText = observedUpBundle ?? "nil"
+            let downMsText = observedDownMs.map { String(format: "%.1f", $0) } ?? "nil"
+            let upMsText = observedUpMs.map { String(format: "%.1f", $0) } ?? "nil"
+
+            return "sent=\(sent),mode=\(mode),expected=\(expectedBundle),point=\(pointText),down=\(downText),downMs=\(downMsText),up=\(upText),upMs=\(upMsText)"
+        }
+    }
+
+    private struct AppExposeCartesianArtifacts {
+        let rootDirectory: URL
+        let scenariosJSONL: URL
+        let failuresJSONL: URL
+        let timelineLog: URL
+        let summaryJSON: URL
+        let reproMarkdown: URL
+    }
+
+    private struct AppExposeCartesianSummary: Codable {
+        struct PhaseCount: Codable {
+            let total: Int
+            let passed: Int
+            let failed: Int
+        }
+
+        struct FamilyCoverage: Codable {
+            let total: Int
+            let failed: Int
+        }
+
+        let profile: String
+        let generatedAt: String
+        let artifactDirectory: String
+        let targets: [String]
+        let scenarioDefinitions: Int
+        let totalRuns: Int
+        let passedRuns: Int
+        let failedRuns: Int
+        let passRate: Double
+        let p95DockResponseLatencyMs: Double?
+        let failureBuckets: [String: Int]
+        let phaseCounts: [String: PhaseCount]
+        let familyCoverage: [String: FamilyCoverage]
+        let isolatedRerunTotal: Int
+        let isolatedRerunPassed: Int
+        let isolatedRerunFailed: Int
+    }
+
+    private enum AppExposeCartesianProfile: String {
+        case bootstrap = "bootstrap"
+        case focused = "focused"
+        case compact = "compact"
+        case full = "full"
+    }
+
+    private struct CompactScenarioTemplate {
+        let family: String
+        let focusState: ScenarioFocusState
+        let inExposeAction: ScenarioInExposeAction
+        let postExitAction: ScenarioPostExitAction
+        let reentryDepth: ScenarioReentryDepth
+        let windowStates: [ScenarioWindowState]
+        let requiresMultipleValues: [Bool]
     }
 
     var isAppExposeShortcutConfigured: Bool {
@@ -451,6 +678,1858 @@ final class DockExposeCoordinator: ObservableObject {
         }
     }
 
+    func runAppExposeCartesianTestSuite() {
+        appExposeCartesianTestStatus = "Running App Expose cartesian regression test..."
+
+        Task { [weak self] in
+            guard let self else { return }
+            let env = ProcessInfo.processInfo.environment
+
+            func failAndTerminate(_ message: String) async {
+                await MainActor.run {
+                    self.appExposeCartesianTestStatus = message
+                    Logger.log(message)
+                    if env["DOCKACTIONER_APPEXPOSE_CARTESIAN_TEST"] == "1" {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            NSApp.terminate(nil)
+                        }
+                    }
+                }
+            }
+
+            refreshPermissionsAndSecurityState()
+
+            if !isRunning {
+                startIfPossible()
+            }
+            guard isRunning else {
+                await failAndTerminate("App Expose cartesian test failed: event tap not running (\(lastStartError ?? "unknown error"))")
+                return
+            }
+
+            if !accessibilityGranted {
+                Logger.log("App Expose cartesian test warning: Accessibility not granted flag; continuing because event tap is running")
+            }
+            if !inputMonitoringGranted {
+                Logger.log("App Expose cartesian test warning: Input Monitoring not granted flag; continuing because event tap is running")
+            }
+
+            let profile = resolveAppExposeCartesianProfile(from: env)
+            let targets = resolveAppExposeCartesianTargets(from: env, profile: profile)
+            let maxScenarios = max(0, Int(env["DOCKACTIONER_APPEXPOSE_CARTESIAN_MAX_SCENARIOS"] ?? "0") ?? 0)
+            let defaultStressRepeat: Int
+            let defaultIsolatedReruns: Int
+            switch profile {
+            case .bootstrap:
+                defaultStressRepeat = 1
+                defaultIsolatedReruns = 0
+            case .focused:
+                defaultStressRepeat = 0
+                defaultIsolatedReruns = 0
+            case .compact:
+                defaultStressRepeat = 1
+                defaultIsolatedReruns = 5
+            case .full:
+                defaultStressRepeat = 3
+                defaultIsolatedReruns = 10
+            }
+            let stressRepeat = max(0, Int(env["DOCKACTIONER_APPEXPOSE_CARTESIAN_REPEAT"] ?? "\(defaultStressRepeat)") ?? defaultStressRepeat)
+            let isolatedReruns = max(0, Int(env["DOCKACTIONER_APPEXPOSE_CARTESIAN_RERUNS"] ?? "\(defaultIsolatedReruns)") ?? defaultIsolatedReruns)
+            let specificScenarioID = env["DOCKACTIONER_APPEXPOSE_CARTESIAN_SCENARIO_ID"]
+
+            guard let artifacts = createAppExposeCartesianArtifacts() else {
+                await failAndTerminate("App Expose cartesian test failed: unable to create artifacts directory")
+                return
+            }
+
+            var scenarios = buildAppExposeCartesianScenarios(targets: targets, profile: profile)
+            if let specificScenarioID, !specificScenarioID.isEmpty {
+                scenarios = scenarios.filter { $0.id == specificScenarioID }
+            }
+            if maxScenarios > 0 {
+                scenarios = Array(scenarios.prefix(maxScenarios))
+            }
+
+            guard !scenarios.isEmpty else {
+                await failAndTerminate("App Expose cartesian test failed: no scenarios selected")
+                return
+            }
+
+            let savedFirstClickBehavior = preferences.firstClickBehavior
+            let savedFirstClickRequiresMulti = preferences.firstClickAppExposeRequiresMultipleWindows
+            let savedClickAction = preferences.clickAction
+            defer {
+                preferences.firstClickBehavior = savedFirstClickBehavior
+                preferences.firstClickAppExposeRequiresMultipleWindows = savedFirstClickRequiresMulti
+                preferences.clickAction = savedClickAction
+            }
+
+            preferences.firstClickBehavior = .appExpose
+            preferences.clickAction = .appExpose
+            cartesianDockPointCache.removeAll()
+
+            let phases: [(name: String, runs: Int)]
+            switch profile {
+            case .focused:
+                phases = [
+                    ("cold", 1),
+                    ("warm", 1)
+                ]
+            default:
+                phases = [
+                    ("cold", 1),
+                    ("warm", 1),
+                    ("stress", stressRepeat)
+                ]
+            }
+            let totalPlannedRuns = scenarios.count * phases.reduce(0) { $0 + $1.runs }
+
+            var totalRuns = 0
+            var passedRuns = 0
+            var failedRuns = 0
+            var latencySamples: [Double] = []
+            var failureBuckets: [ScenarioFailureBucket: Int] = [:]
+            var phaseCounts: [String: AppExposeCartesianSummary.PhaseCount] = [:]
+            var familyCoverage: [String: AppExposeCartesianSummary.FamilyCoverage] = [:]
+            var histories: [String: ScenarioHistory] = [:]
+
+            for family in requiredScenarioFamilies() {
+                familyCoverage[family] = .init(total: 0, failed: 0)
+            }
+
+            appendLine("App Expose cartesian run started at \(iso8601String(Date()))", to: artifacts.timelineLog)
+            appendLine("profile=\(profile.rawValue) targets=\(targets.joined(separator: ",")) scenarios=\(scenarios.count) stressRepeat=\(stressRepeat)", to: artifacts.timelineLog)
+
+            var globalRunIndex = 0
+            for target in targets {
+                let perTarget = scenarios.filter { $0.targetBundle == target }
+                if perTarget.isEmpty {
+                    continue
+                }
+
+                appendLine("[\(iso8601String(Date()))] target-start \(target) scenarios=\(perTarget.count)", to: artifacts.timelineLog)
+                for phase in phases {
+                    var phaseTotal = phaseCounts[phase.name]?.total ?? 0
+                    var phasePassed = phaseCounts[phase.name]?.passed ?? 0
+                    var phaseFailed = phaseCounts[phase.name]?.failed ?? 0
+
+                    for run in 1...phase.runs {
+                        for scenario in perTarget {
+                            globalRunIndex += 1
+                            appExposeCartesianTestStatus = "App Expose cartesian test: run \(globalRunIndex)/\(totalPlannedRuns) target=\(scenario.targetBundle) phase=\(phase.name)"
+
+                            appendLine("[\(iso8601String(Date()))] scenario-start id=\(scenario.id) phase=\(phase.name) run=\(run)", to: artifacts.timelineLog)
+                            let result = await executeAppExposeCartesianScenario(scenario,
+                                                                                 phase: phase.name,
+                                                                                 runIndex: run,
+                                                                                 targetPool: targets)
+                            appendLine("[\(iso8601String(Date()))] scenario-end id=\(scenario.id) passed=\(result.passed) bucket=\(result.failureBucket?.rawValue ?? "none") latencyMs=\(result.dockResponseLatencyMs.map { String(format: "%.1f", $0) } ?? "nil")", to: artifacts.timelineLog)
+
+                            if let json = jsonLine(result) {
+                                appendLine(json, to: artifacts.scenariosJSONL)
+                            }
+                            if !result.passed {
+                                let failure = AppExposeFailureRecord(
+                                    scenarioID: result.scenario.id,
+                                    targetBundle: result.scenario.targetBundle,
+                                    phase: result.phase,
+                                    runIndex: result.runIndex,
+                                    tuple: scenarioTuple(result.scenario),
+                                    family: result.scenario.family,
+                                    bucket: result.failureBucket?.rawValue ?? "unknown",
+                                    details: result.details
+                                )
+                                if let json = jsonLine(failure) {
+                                    appendLine(json, to: artifacts.failuresJSONL)
+                                }
+                            }
+
+                            totalRuns += 1
+                            phaseTotal += 1
+                            if result.passed {
+                                passedRuns += 1
+                                phasePassed += 1
+                            } else {
+                                failedRuns += 1
+                                phaseFailed += 1
+                            }
+
+                            if let latency = result.dockResponseLatencyMs {
+                                latencySamples.append(latency)
+                            }
+                            if let bucket = result.failureBucket {
+                                failureBuckets[bucket, default: 0] += 1
+                            }
+
+                            var coverage = familyCoverage[result.scenario.family] ?? .init(total: 0, failed: 0)
+                            coverage = .init(total: coverage.total + 1,
+                                             failed: coverage.failed + (result.passed ? 0 : 1))
+                            familyCoverage[result.scenario.family] = coverage
+
+                            var history = histories[result.scenario.id] ?? ScenarioHistory(scenario: result.scenario,
+                                                                                            runs: 0,
+                                                                                            failures: 0,
+                                                                                            failureSamples: [])
+                            history.runs += 1
+                            if !result.passed {
+                                history.failures += 1
+                                if history.failureSamples.count < 5 {
+                                    history.failureSamples.append(result.details)
+                                }
+                            }
+                            histories[result.scenario.id] = history
+                        }
+                    }
+
+                    phaseCounts[phase.name] = .init(total: phaseTotal, passed: phasePassed, failed: phaseFailed)
+                }
+                appendLine("[\(iso8601String(Date()))] target-end \(target)", to: artifacts.timelineLog)
+            }
+
+            let failedScenarioDefinitions = histories.values.filter { $0.failures > 0 }.map { $0.scenario }
+            var isolatedRerunTotal = 0
+            var isolatedRerunPassed = 0
+            var isolatedRerunFailed = 0
+            var isolatedOutcomes: [String: [Bool]] = [:]
+
+            if isolatedReruns > 0 && !failedScenarioDefinitions.isEmpty {
+                appendLine("[\(iso8601String(Date()))] isolated-reruns-start count=\(failedScenarioDefinitions.count) iterations=\(isolatedReruns)", to: artifacts.timelineLog)
+                for scenario in failedScenarioDefinitions {
+                    for iteration in 1...isolatedReruns {
+                        let rerun = await executeAppExposeCartesianScenario(scenario,
+                                                                            phase: "isolated-rerun",
+                                                                            runIndex: iteration,
+                                                                            targetPool: targets)
+                        isolatedRerunTotal += 1
+                        if rerun.passed {
+                            isolatedRerunPassed += 1
+                        } else {
+                            isolatedRerunFailed += 1
+                        }
+                        isolatedOutcomes[scenario.id, default: []].append(rerun.passed)
+
+                        if let json = jsonLine(rerun) {
+                            appendLine(json, to: artifacts.scenariosJSONL)
+                        }
+                        if !rerun.passed {
+                            let failure = AppExposeFailureRecord(
+                                scenarioID: rerun.scenario.id,
+                                targetBundle: rerun.scenario.targetBundle,
+                                phase: rerun.phase,
+                                runIndex: rerun.runIndex,
+                                tuple: scenarioTuple(rerun.scenario),
+                                family: rerun.scenario.family,
+                                bucket: rerun.failureBucket?.rawValue ?? "unknown",
+                                details: rerun.details
+                            )
+                            if let json = jsonLine(failure) {
+                                appendLine(json, to: artifacts.failuresJSONL)
+                            }
+                        }
+                    }
+                }
+                appendLine("[\(iso8601String(Date()))] isolated-reruns-end total=\(isolatedRerunTotal) passed=\(isolatedRerunPassed) failed=\(isolatedRerunFailed)", to: artifacts.timelineLog)
+            }
+
+            let passRate = totalRuns > 0 ? Double(passedRuns) / Double(totalRuns) : 0.0
+            let p95Latency = percentile95(values: latencySamples)
+
+            var bucketSummary: [String: Int] = [:]
+            for bucket in [
+                ScenarioFailureBucket.triggerMissed,
+                ScenarioFailureBucket.exitStuck,
+                ScenarioFailureBucket.dockUnresponsive,
+                ScenarioFailureBucket.reentryBroken,
+                ScenarioFailureBucket.wrongTargetWindow
+            ] {
+                bucketSummary[bucket.rawValue] = 0
+            }
+            for (bucket, count) in failureBuckets {
+                bucketSummary[bucket.rawValue] = count
+            }
+            let summary = AppExposeCartesianSummary(
+                profile: profile.rawValue,
+                generatedAt: iso8601String(Date()),
+                artifactDirectory: artifacts.rootDirectory.path,
+                targets: targets,
+                scenarioDefinitions: scenarios.count,
+                totalRuns: totalRuns,
+                passedRuns: passedRuns,
+                failedRuns: failedRuns,
+                passRate: passRate,
+                p95DockResponseLatencyMs: p95Latency,
+                failureBuckets: bucketSummary,
+                phaseCounts: phaseCounts,
+                familyCoverage: familyCoverage,
+                isolatedRerunTotal: isolatedRerunTotal,
+                isolatedRerunPassed: isolatedRerunPassed,
+                isolatedRerunFailed: isolatedRerunFailed
+            )
+            writeJSONObject(summary, to: artifacts.summaryJSON)
+
+            let deterministic = histories.values
+                .filter { history in
+                    guard history.failures > 0 else { return false }
+                    if history.failures == history.runs {
+                        return true
+                    }
+                    if let reruns = isolatedOutcomes[history.scenario.id], !reruns.isEmpty {
+                        return reruns.allSatisfy { !$0 }
+                    }
+                    return false
+                }
+                .sorted { lhs, rhs in
+                    if lhs.failures == rhs.failures {
+                        return lhs.scenario.id < rhs.scenario.id
+                    }
+                    return lhs.failures > rhs.failures
+                }
+
+            writeAppExposeReproMarkdown(histories: deterministic, artifacts: artifacts, rerunIterations: isolatedReruns)
+
+            let percentText = String(format: "%.2f", passRate * 100.0)
+            let latencyText = p95Latency.map { String(format: "%.1fms", $0) } ?? "n/a"
+            let summaryText = "App Expose cartesian test (\(profile.rawValue)): passed \(passedRuns)/\(totalRuns) (\(percentText)%) p95Latency=\(latencyText) artifacts=\(artifacts.rootDirectory.path)"
+            appExposeCartesianTestStatus = summaryText
+            Logger.log(summaryText)
+
+            if env["DOCKACTIONER_APPEXPOSE_CARTESIAN_TEST"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+    }
+
+    private func executeAppExposeCartesianScenario(_ scenario: AppExposeScenario,
+                                                   phase: String,
+                                                   runIndex: Int,
+                                                   targetPool: [String]) async -> AppExposeScenarioResult {
+        var stepTrace: [ScenarioStep] = []
+        var detailParts: [String] = []
+
+        let startedAt = Date()
+        let oracle = scenarioOracle(for: scenario)
+        let frontmostBefore = FrontmostAppTracker.frontmostBundleIdentifier() ?? "nil"
+
+        stepTrace.append(.prepareWindowState)
+        await ensureAppRunningForFirstClickTest(bundleIdentifier: scenario.targetBundle)
+        let setup = await prepareScenarioWindowState(scenario.windowState, targetBundle: scenario.targetBundle)
+        detailParts.append("setup=\(setup.detail)")
+
+        stepTrace.append(.primeFocusState)
+        let alternateBundle = await resolveAlternateBundle(for: scenario.targetBundle, targetPool: targetPool)
+        await primeScenarioFocusState(scenario.focusState,
+                                      targetBundle: scenario.targetBundle,
+                                      alternateBundle: alternateBundle)
+
+        guard let targetPoint = resolveCartesianDockIconPoint(bundleIdentifier: scenario.targetBundle) else {
+            let finished = Date()
+            return AppExposeScenarioResult(
+                scenario: scenario,
+                phase: phase,
+                runIndex: runIndex,
+                startedAt: iso8601String(startedAt),
+                finishedAt: iso8601String(finished),
+                passed: false,
+                failureBucket: .wrongTargetWindow,
+                oracle: oracle,
+                triggered: false,
+                inExposeExitOK: false,
+                reentryOK: false,
+                stateConsistencyOK: false,
+                setupOK: false,
+                dockResponseLatencyMs: nil,
+                frontmostBefore: frontmostBefore,
+                frontmostAfter: FrontmostAppTracker.frontmostBundleIdentifier() ?? "nil",
+                stepTrace: stepTrace,
+                setup: setup,
+                details: "failed to locate Dock icon for \(scenario.targetBundle)"
+            )
+        }
+
+        let alternatePoint = alternateBundle.flatMap { resolveCartesianDockIconPoint(bundleIdentifier: $0) }
+
+        preferences.firstClickBehavior = .appExpose
+        preferences.clickAction = .appExpose
+        preferences.firstClickAppExposeRequiresMultipleWindows = scenario.requiresMultipleWindows
+
+        exitAppExpose()
+        try? await Task.sleep(nanoseconds: 120_000_000)
+
+        stepTrace.append(.triggerFirstClick)
+        let triggerBaseline = lastActionExecutedAt ?? Date.distantPast
+        let triggerClick = await performCartesianDockClick(bundleIdentifier: scenario.targetBundle, at: targetPoint)
+        detailParts.append("triggerClick=\(triggerClick.summary)")
+        let triggered = await waitForAppExposeTrigger(expectedBundle: scenario.targetBundle,
+                                                      baseline: triggerBaseline,
+                                                      timeout: 1.4)
+        detailParts.append("triggered=\(triggered) expected=\(oracle.expectedTrigger)")
+
+        let triggerMatchesOracle = (triggered == oracle.expectedTrigger)
+
+        var inExposeActionResult = ScenarioActionOutcome(ok: true, detail: "skipped")
+        var inExposeExitOK = true
+        var postActionResult = ScenarioActionOutcome(ok: true, detail: "skipped")
+        var reentryOK = true
+        var stateConsistencyOK = true
+
+        if oracle.expectedTrigger && triggered {
+            stepTrace.append(.performInExposeAction)
+            inExposeActionResult = await performScenarioInExposeAction(scenario.inExposeAction,
+                                                                       targetBundle: scenario.targetBundle,
+                                                                       targetPoint: targetPoint,
+                                                                       alternateBundle: alternateBundle,
+                                                                       alternatePoint: alternatePoint)
+            detailParts.append("inExposeAction=\(inExposeActionResult.detail)")
+            let exposeTrackingActiveAfterInAction = isExposeTrackingActive()
+            let expectedTrackingAfterInAction = expectedTrackingStateAfterInExposeAction(scenario.inExposeAction)
+            inExposeExitOK = inExposeActionResult.ok && exposeTrackingActiveAfterInAction == expectedTrackingAfterInAction
+            if scenario.family.hasPrefix("BOOTSTRAP_") {
+                inExposeExitOK = inExposeActionResult.ok
+            }
+
+            // Validate cancel/reset semantics immediately after the in-expose action, before any follow-up click.
+            stepTrace.append(.validateStateConsistency)
+            if oracle.requiresStateResetAfterCancel {
+                stateConsistencyOK = !isExposeTrackingActive()
+            } else {
+                stateConsistencyOK = true
+            }
+            detailParts.append("stateConsistencyOK=\(stateConsistencyOK)")
+
+            stepTrace.append(.performPostExitAction)
+            postActionResult = await performScenarioPostExitAction(action: scenario.postExitAction,
+                                                                   depth: scenario.reentryDepth,
+                                                                   targetBundle: scenario.targetBundle,
+                                                                   targetPoint: targetPoint,
+                                                                   alternateBundle: alternateBundle,
+                                                                   alternatePoint: alternatePoint)
+            detailParts.append("postExitAction=\(postActionResult.detail)")
+
+            stepTrace.append(.validateReentry)
+            if scenario.family.hasPrefix("BOOTSTRAP_") {
+                reentryOK = true
+                detailParts.append("reentryOK=skipped_bootstrap")
+            } else if scenario.family.hasPrefix("FOCUSED_") {
+                reentryOK = true
+                detailParts.append("reentryOK=skipped_focused")
+            } else {
+                reentryOK = await validateScenarioReentry(depth: scenario.reentryDepth,
+                                                          targetBundle: scenario.targetBundle,
+                                                          targetPoint: targetPoint,
+                                                          alternateBundle: alternateBundle,
+                                                          alternatePoint: alternatePoint)
+                detailParts.append("reentryOK=\(reentryOK)")
+            }
+        } else {
+            stepTrace.append(.performInExposeAction)
+            if triggerMatchesOracle && !oracle.expectedTrigger {
+                inExposeActionResult = ScenarioActionOutcome(ok: true, detail: "skipped (expected no App Expose)")
+            } else {
+                inExposeActionResult = ScenarioActionOutcome(ok: false, detail: "skipped (trigger mismatch)")
+            }
+            detailParts.append("inExposeAction=\(inExposeActionResult.detail)")
+            inExposeExitOK = triggerMatchesOracle
+
+            stepTrace.append(.validateStateConsistency)
+            stateConsistencyOK = !isExposeTrackingActive()
+            detailParts.append("stateConsistencyOK=\(stateConsistencyOK)")
+
+            if triggerMatchesOracle && !oracle.expectedTrigger {
+                stepTrace.append(.performPostExitAction)
+                postActionResult = await performScenarioPostExitAction(action: scenario.postExitAction,
+                                                                       depth: scenario.reentryDepth,
+                                                                       targetBundle: scenario.targetBundle,
+                                                                       targetPoint: targetPoint,
+                                                                       alternateBundle: alternateBundle,
+                                                                       alternatePoint: alternatePoint)
+                detailParts.append("postExitAction=\(postActionResult.detail)")
+
+                stepTrace.append(.validateReentry)
+                reentryOK = true
+                detailParts.append("reentryOK=not_applicable")
+            } else {
+                stepTrace.append(.performPostExitAction)
+                postActionResult = ScenarioActionOutcome(ok: true, detail: "skipped (trigger mismatch)")
+                detailParts.append("postExitAction=\(postActionResult.detail)")
+
+                stepTrace.append(.validateReentry)
+                reentryOK = true
+                detailParts.append("reentryOK=skipped")
+            }
+        }
+
+        stepTrace.append(.probeDockResponsiveness)
+        let dockLatency = await probeScenarioDockResponsiveness(targetBundle: scenario.targetBundle,
+                                                                targetPoint: targetPoint,
+                                                                alternateBundle: alternateBundle,
+                                                                alternatePoint: alternatePoint)
+        if let dockLatency {
+            detailParts.append(String(format: "dockLatencyMs=%.1f", dockLatency))
+        } else {
+            detailParts.append("dockLatencyMs=nil")
+        }
+
+        stepTrace.append(.finalize)
+        exitAppExpose()
+        try? await Task.sleep(nanoseconds: 90_000_000)
+
+        let setupOK = setup.achieved
+        let postExitOK = postActionResult.ok
+        let reentryAndPostOK = reentryOK && postExitOK
+        let dockResponsive = dockLatency.map { $0 <= oracle.responsivenessHardFailMs } ?? (!oracle.expectedTrigger || !triggerMatchesOracle)
+
+        let failureBucket: ScenarioFailureBucket?
+        if !setupOK {
+            failureBucket = .wrongTargetWindow
+        } else if !triggerMatchesOracle {
+            failureBucket = .triggerMissed
+        } else if !inExposeExitOK {
+            failureBucket = .exitStuck
+        } else if !postExitOK {
+            failureBucket = .exitStuck
+        } else if !reentryOK {
+            failureBucket = .reentryBroken
+        } else if !dockResponsive {
+            failureBucket = .dockUnresponsive
+        } else if !stateConsistencyOK {
+            failureBucket = .exitStuck
+        } else {
+            failureBucket = nil
+        }
+
+        let passed = failureBucket == nil
+        let finishedAt = Date()
+
+        return AppExposeScenarioResult(
+            scenario: scenario,
+            phase: phase,
+            runIndex: runIndex,
+            startedAt: iso8601String(startedAt),
+            finishedAt: iso8601String(finishedAt),
+            passed: passed,
+            failureBucket: failureBucket,
+            oracle: oracle,
+            triggered: triggered,
+            inExposeExitOK: inExposeExitOK,
+            reentryOK: reentryAndPostOK,
+            stateConsistencyOK: stateConsistencyOK,
+            setupOK: setupOK,
+            dockResponseLatencyMs: dockLatency,
+            frontmostBefore: frontmostBefore,
+            frontmostAfter: FrontmostAppTracker.frontmostBundleIdentifier() ?? "nil",
+            stepTrace: stepTrace,
+            setup: setup,
+            details: detailParts.joined(separator: " | ")
+        )
+    }
+
+    private func scenarioOracle(for scenario: AppExposeScenario) -> ScenarioOracle {
+        let suppressedByWindowGate = scenario.requiresMultipleWindows
+            && (scenario.windowState == .zeroWindows || scenario.windowState == .oneWindow)
+        let requiresStateReset = scenario.inExposeAction == .clickNegativeSpace || scenario.inExposeAction == .pressEscape
+        return ScenarioOracle(expectedTrigger: !suppressedByWindowGate,
+                              responsivenessWarnMs: 1000.0,
+                              responsivenessHardFailMs: 2000.0,
+                              requiresStateResetAfterCancel: requiresStateReset)
+    }
+
+    private func buildAppExposeCartesianScenarios(targets: [String],
+                                                  profile: AppExposeCartesianProfile) -> [AppExposeScenario] {
+        switch profile {
+        case .bootstrap:
+            return buildBootstrapAppExposeScenarios(targets: targets)
+        case .focused:
+            return buildFocusedAppExposeScenarios(targets: targets)
+        case .compact:
+            return buildCompactAppExposeScenarios(targets: targets)
+        case .full:
+            return buildFullAppExposeScenarios(targets: targets)
+        }
+    }
+
+    private func buildBootstrapAppExposeScenarios(targets: [String]) -> [AppExposeScenario] {
+        var scenarios: [AppExposeScenario] = []
+        for target in targets {
+            let gateOff = AppExposeScenario(
+                id: "\(target)|BOOTSTRAP_TRIGGER_GATE_OFF",
+                family: "BOOTSTRAP_TRIGGER_GATE_OFF",
+                targetBundle: target,
+                requiresMultipleWindows: true,
+                windowState: .oneWindow,
+                focusState: .otherAppFrontmost,
+                inExposeAction: .selectTargetWindow,
+                postExitAction: .clickTargetWindow,
+                reentryDepth: .single
+            )
+            let gateOn = AppExposeScenario(
+                id: "\(target)|BOOTSTRAP_TRIGGER_GATE_ON",
+                family: "BOOTSTRAP_TRIGGER_GATE_ON",
+                targetBundle: target,
+                requiresMultipleWindows: false,
+                windowState: .oneWindow,
+                focusState: .otherAppFrontmost,
+                inExposeAction: .selectTargetWindow,
+                postExitAction: .clickTargetWindow,
+                reentryDepth: .single
+            )
+            scenarios.append(gateOff)
+            scenarios.append(gateOn)
+        }
+        return scenarios
+    }
+
+    private func buildFocusedAppExposeScenarios(targets: [String]) -> [AppExposeScenario] {
+        var scenarios: [AppExposeScenario] = []
+        for target in targets {
+            scenarios.append(AppExposeScenario(
+                id: "\(target)|FOCUSED_GATE_SUPPRESS",
+                family: "FOCUSED_GATE_SUPPRESS",
+                targetBundle: target,
+                requiresMultipleWindows: true,
+                windowState: .oneWindow,
+                focusState: .otherAppFrontmost,
+                inExposeAction: .selectTargetWindow,
+                postExitAction: .clickTargetWindow,
+                reentryDepth: .single
+            ))
+            scenarios.append(AppExposeScenario(
+                id: "\(target)|FOCUSED_GATE_ALLOW_MULTI",
+                family: "FOCUSED_GATE_ALLOW_MULTI",
+                targetBundle: target,
+                requiresMultipleWindows: true,
+                windowState: .twoPlusWindows,
+                focusState: .otherAppFrontmost,
+                inExposeAction: .selectTargetWindow,
+                postExitAction: .clickTargetWindow,
+                reentryDepth: .single
+            ))
+            scenarios.append(AppExposeScenario(
+                id: "\(target)|FOCUSED_GATE_ALLOW_SINGLE",
+                family: "FOCUSED_GATE_ALLOW_SINGLE",
+                targetBundle: target,
+                requiresMultipleWindows: false,
+                windowState: .oneWindow,
+                focusState: .otherAppFrontmost,
+                inExposeAction: .selectTargetWindow,
+                postExitAction: .clickTargetWindow,
+                reentryDepth: .single
+            ))
+            scenarios.append(AppExposeScenario(
+                id: "\(target)|FOCUSED_NEGSPACE_SAME_MULTI",
+                family: "FOCUSED_NEGSPACE_SAME_MULTI",
+                targetBundle: target,
+                requiresMultipleWindows: true,
+                windowState: .twoPlusWindows,
+                focusState: .otherAppFrontmost,
+                inExposeAction: .clickNegativeSpace,
+                postExitAction: .clickSameAppIcon,
+                reentryDepth: .single
+            ))
+            scenarios.append(AppExposeScenario(
+                id: "\(target)|FOCUSED_NEGSPACE_OTHER_MULTI",
+                family: "FOCUSED_NEGSPACE_OTHER_MULTI",
+                targetBundle: target,
+                requiresMultipleWindows: true,
+                windowState: .twoPlusWindows,
+                focusState: .otherAppFrontmost,
+                inExposeAction: .clickNegativeSpace,
+                postExitAction: .clickOtherAppIcon,
+                reentryDepth: .single
+            ))
+            scenarios.append(AppExposeScenario(
+                id: "\(target)|FOCUSED_NEGSPACE_SAME_SINGLE",
+                family: "FOCUSED_NEGSPACE_SAME_SINGLE",
+                targetBundle: target,
+                requiresMultipleWindows: false,
+                windowState: .oneWindow,
+                focusState: .otherAppFrontmost,
+                inExposeAction: .clickNegativeSpace,
+                postExitAction: .clickSameAppIcon,
+                reentryDepth: .single
+            ))
+            scenarios.append(AppExposeScenario(
+                id: "\(target)|FOCUSED_NEGSPACE_OTHER_SINGLE",
+                family: "FOCUSED_NEGSPACE_OTHER_SINGLE",
+                targetBundle: target,
+                requiresMultipleWindows: false,
+                windowState: .oneWindow,
+                focusState: .otherAppFrontmost,
+                inExposeAction: .clickNegativeSpace,
+                postExitAction: .clickOtherAppIcon,
+                reentryDepth: .single
+            ))
+        }
+        return scenarios
+    }
+
+    private func buildFullAppExposeScenarios(targets: [String]) -> [AppExposeScenario] {
+        var scenarios: [AppExposeScenario] = []
+        for target in targets {
+            for requiresMultipleWindows in [true, false] {
+                for windowState in ScenarioWindowState.allCases {
+                    for focusState in ScenarioFocusState.allCases {
+                        for inExposeAction in ScenarioInExposeAction.allCases {
+                            for postExitAction in ScenarioPostExitAction.allCases {
+                                for reentryDepth in ScenarioReentryDepth.allCases {
+                                    let prototype = AppExposeScenario(
+                                        id: "",
+                                        family: "",
+                                        targetBundle: target,
+                                        requiresMultipleWindows: requiresMultipleWindows,
+                                        windowState: windowState,
+                                        focusState: focusState,
+                                        inExposeAction: inExposeAction,
+                                        postExitAction: postExitAction,
+                                        reentryDepth: reentryDepth
+                                    )
+                                    let family = appExposeScenarioFamily(for: prototype)
+                                    let id = "\(target)|P\(requiresMultipleWindows ? 1 : 0)|W\(windowState.rawValue)|F\(focusState.rawValue)|E\(inExposeAction.rawValue)|A\(postExitAction.rawValue)|R\(reentryDepth.rawValue)"
+                                    let scenario = AppExposeScenario(
+                                        id: id,
+                                        family: family,
+                                        targetBundle: target,
+                                        requiresMultipleWindows: requiresMultipleWindows,
+                                        windowState: windowState,
+                                        focusState: focusState,
+                                        inExposeAction: inExposeAction,
+                                        postExitAction: postExitAction,
+                                        reentryDepth: reentryDepth
+                                    )
+                                    scenarios.append(scenario)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return scenarios
+    }
+
+    private func buildCompactAppExposeScenarios(targets: [String]) -> [AppExposeScenario] {
+        var scenarios: [AppExposeScenario] = []
+        for target in targets {
+            for template in compactScenarioTemplates() {
+                for requiresMultipleWindows in template.requiresMultipleValues {
+                    for windowState in template.windowStates {
+                        let id = "\(target)|\(template.family)|P\(requiresMultipleWindows ? 1 : 0)|W\(windowState.rawValue)"
+                        let scenario = AppExposeScenario(
+                            id: id,
+                            family: template.family,
+                            targetBundle: target,
+                            requiresMultipleWindows: requiresMultipleWindows,
+                            windowState: windowState,
+                            focusState: template.focusState,
+                            inExposeAction: template.inExposeAction,
+                            postExitAction: template.postExitAction,
+                            reentryDepth: template.reentryDepth
+                        )
+                        scenarios.append(scenario)
+                    }
+                }
+            }
+        }
+        return scenarios
+    }
+
+    private func compactScenarioTemplates() -> [CompactScenarioTemplate] {
+        let standardWindows: [ScenarioWindowState] = [.oneWindow, .twoPlusWindows]
+        let bothPreferenceModes = [true, false]
+        return [
+            .init(family: "NEGSPACE_CANCEL_THEN_SAME_ICON",
+                  focusState: .otherAppFrontmost,
+                  inExposeAction: .clickNegativeSpace,
+                  postExitAction: .clickSameAppIcon,
+                  reentryDepth: .single,
+                  windowStates: standardWindows,
+                  requiresMultipleValues: bothPreferenceModes),
+            .init(family: "NEGSPACE_CANCEL_THEN_OTHER_ICON",
+                  focusState: .otherAppFrontmost,
+                  inExposeAction: .clickNegativeSpace,
+                  postExitAction: .clickOtherAppIcon,
+                  reentryDepth: .single,
+                  windowStates: standardWindows,
+                  requiresMultipleValues: bothPreferenceModes),
+            .init(family: "SELECT_WINDOW_THEN_OTHER_ICON",
+                  focusState: .otherAppFrontmost,
+                  inExposeAction: .selectTargetWindow,
+                  postExitAction: .clickOtherAppIcon,
+                  reentryDepth: .single,
+                  windowStates: standardWindows,
+                  requiresMultipleValues: bothPreferenceModes),
+            .init(family: "SELECT_WINDOW_THEN_SAME_ICON",
+                  focusState: .otherAppFrontmost,
+                  inExposeAction: .selectTargetWindow,
+                  postExitAction: .clickSameAppIcon,
+                  reentryDepth: .single,
+                  windowStates: standardWindows,
+                  requiresMultipleValues: bothPreferenceModes),
+            .init(family: "ESCAPE_EXIT_THEN_OTHER_ICON",
+                  focusState: .otherAppFrontmost,
+                  inExposeAction: .pressEscape,
+                  postExitAction: .clickOtherAppIcon,
+                  reentryDepth: .single,
+                  windowStates: standardWindows,
+                  requiresMultipleValues: bothPreferenceModes),
+            .init(family: "ESCAPE_EXIT_THEN_SAME_ICON",
+                  focusState: .otherAppFrontmost,
+                  inExposeAction: .pressEscape,
+                  postExitAction: .clickSameAppIcon,
+                  reentryDepth: .single,
+                  windowStates: standardWindows,
+                  requiresMultipleValues: bothPreferenceModes),
+            .init(family: "SAME_ICON_TOGGLE_LOOP",
+                  focusState: .otherAppFrontmost,
+                  inExposeAction: .clickSameAppDockIcon,
+                  postExitAction: .clickSameAppIcon,
+                  reentryDepth: .doubleImmediate,
+                  windowStates: standardWindows,
+                  requiresMultipleValues: bothPreferenceModes),
+            .init(family: "OTHER_ICON_SWITCH_DURING_EXPOSE",
+                  focusState: .otherAppFrontmost,
+                  inExposeAction: .clickOtherAppDockIcon,
+                  postExitAction: .clickOtherAppIcon,
+                  reentryDepth: .single,
+                  windowStates: standardWindows,
+                  requiresMultipleValues: bothPreferenceModes),
+            .init(family: "CMDTAB_SWITCH_DURING_EXPOSE",
+                  focusState: .otherAppFrontmost,
+                  inExposeAction: .cmdTabOtherApp,
+                  postExitAction: .clickOtherAppIcon,
+                  reentryDepth: .single,
+                  windowStates: standardWindows,
+                  requiresMultipleValues: bothPreferenceModes),
+            .init(family: "REENTRY_AFTER_SWITCH",
+                  focusState: .otherAppFrontmost,
+                  inExposeAction: .selectTargetWindow,
+                  postExitAction: .reenterAppExposeAfterSwitch,
+                  reentryDepth: .doubleImmediate,
+                  windowStates: standardWindows,
+                  requiresMultipleValues: bothPreferenceModes),
+            .init(family: "REENTRY_WITH_REQUIRES_MULTI_ON_AND_ONE_WINDOW",
+                  focusState: .otherAppFrontmost,
+                  inExposeAction: .selectTargetWindow,
+                  postExitAction: .reenterAppExposeSameApp,
+                  reentryDepth: .single,
+                  windowStates: [.oneWindow],
+                  requiresMultipleValues: [true]),
+            .init(family: "REENTRY_WITH_REQUIRES_MULTI_OFF_AND_ONE_WINDOW",
+                  focusState: .otherAppFrontmost,
+                  inExposeAction: .selectTargetWindow,
+                  postExitAction: .reenterAppExposeSameApp,
+                  reentryDepth: .single,
+                  windowStates: [.oneWindow],
+                  requiresMultipleValues: [false]),
+        ]
+    }
+
+    private func appExposeScenarioFamily(for scenario: AppExposeScenario) -> String {
+        if scenario.inExposeAction == .clickNegativeSpace, scenario.postExitAction == .clickSameAppIcon {
+            return "NEGSPACE_CANCEL_THEN_SAME_ICON"
+        }
+        if scenario.inExposeAction == .clickNegativeSpace, scenario.postExitAction == .clickOtherAppIcon {
+            return "NEGSPACE_CANCEL_THEN_OTHER_ICON"
+        }
+        if scenario.inExposeAction == .selectTargetWindow, scenario.postExitAction == .clickOtherAppIcon {
+            return "SELECT_WINDOW_THEN_OTHER_ICON"
+        }
+        if scenario.inExposeAction == .selectTargetWindow, scenario.postExitAction == .clickSameAppIcon {
+            return "SELECT_WINDOW_THEN_SAME_ICON"
+        }
+        if scenario.inExposeAction == .pressEscape, scenario.postExitAction == .clickOtherAppIcon {
+            return "ESCAPE_EXIT_THEN_OTHER_ICON"
+        }
+        if scenario.inExposeAction == .pressEscape, scenario.postExitAction == .clickSameAppIcon {
+            return "ESCAPE_EXIT_THEN_SAME_ICON"
+        }
+        if scenario.inExposeAction == .clickSameAppDockIcon {
+            return "SAME_ICON_TOGGLE_LOOP"
+        }
+        if scenario.inExposeAction == .clickOtherAppDockIcon {
+            return "OTHER_ICON_SWITCH_DURING_EXPOSE"
+        }
+        if scenario.inExposeAction == .cmdTabOtherApp {
+            return "CMDTAB_SWITCH_DURING_EXPOSE"
+        }
+        if scenario.requiresMultipleWindows && scenario.windowState == .oneWindow
+            && (scenario.postExitAction == .reenterAppExposeAfterSwitch || scenario.postExitAction == .reenterAppExposeSameApp) {
+            return "REENTRY_WITH_REQUIRES_MULTI_ON_AND_ONE_WINDOW"
+        }
+        if !scenario.requiresMultipleWindows && scenario.windowState == .oneWindow
+            && (scenario.postExitAction == .reenterAppExposeAfterSwitch || scenario.postExitAction == .reenterAppExposeSameApp) {
+            return "REENTRY_WITH_REQUIRES_MULTI_OFF_AND_ONE_WINDOW"
+        }
+        if scenario.postExitAction == .reenterAppExposeAfterSwitch {
+            return "REENTRY_AFTER_SWITCH"
+        }
+        return "GENERAL"
+    }
+
+    private func requiredScenarioFamilies() -> [String] {
+        [
+            "NEGSPACE_CANCEL_THEN_SAME_ICON",
+            "NEGSPACE_CANCEL_THEN_OTHER_ICON",
+            "SELECT_WINDOW_THEN_OTHER_ICON",
+            "SELECT_WINDOW_THEN_SAME_ICON",
+            "ESCAPE_EXIT_THEN_OTHER_ICON",
+            "ESCAPE_EXIT_THEN_SAME_ICON",
+            "SAME_ICON_TOGGLE_LOOP",
+            "OTHER_ICON_SWITCH_DURING_EXPOSE",
+            "CMDTAB_SWITCH_DURING_EXPOSE",
+            "REENTRY_AFTER_SWITCH",
+            "REENTRY_WITH_REQUIRES_MULTI_ON_AND_ONE_WINDOW",
+            "REENTRY_WITH_REQUIRES_MULTI_OFF_AND_ONE_WINDOW",
+            "BOOTSTRAP_TRIGGER_GATE_OFF",
+            "BOOTSTRAP_TRIGGER_GATE_ON",
+            "FOCUSED_GATE_SUPPRESS",
+            "FOCUSED_GATE_ALLOW_MULTI",
+            "FOCUSED_GATE_ALLOW_SINGLE",
+            "FOCUSED_NEGSPACE_SAME_MULTI",
+            "FOCUSED_NEGSPACE_OTHER_MULTI",
+            "FOCUSED_NEGSPACE_SAME_SINGLE",
+            "FOCUSED_NEGSPACE_OTHER_SINGLE"
+        ]
+    }
+
+    private func scenarioTuple(_ scenario: AppExposeScenario) -> String {
+        "P=\(scenario.requiresMultipleWindows ? 1 : 0),W=\(scenario.windowState.rawValue),F=\(scenario.focusState.rawValue),E=\(scenario.inExposeAction.rawValue),A=\(scenario.postExitAction.rawValue),R=\(scenario.reentryDepth.rawValue)"
+    }
+
+    private func resolveAppExposeCartesianProfile(from env: [String: String]) -> AppExposeCartesianProfile {
+        if env["DOCKACTIONER_APPEXPOSE_CARTESIAN_FULL"] == "1" {
+            return .full
+        }
+        let raw = env["DOCKACTIONER_APPEXPOSE_CARTESIAN_PROFILE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if raw == "bootstrap" {
+            return .bootstrap
+        }
+        if raw == "focused" {
+            return .focused
+        }
+        if raw == "full" {
+            return .full
+        }
+        if raw == "compact" {
+            return .compact
+        }
+        return .compact
+    }
+
+    private func resolveAppExposeCartesianTargets(from env: [String: String],
+                                                  profile: AppExposeCartesianProfile) -> [String] {
+        let defaults: [String]
+        switch profile {
+        case .bootstrap:
+            defaults = [
+                "com.apple.finder",
+                "com.apple.TextEdit"
+            ]
+        case .focused:
+            defaults = [
+                "com.apple.finder",
+                "com.apple.TextEdit"
+            ]
+        case .compact:
+            defaults = [
+                "com.apple.finder",
+                "com.microsoft.VSCode"
+            ]
+        case .full:
+            defaults = [
+                "com.apple.finder",
+                "com.apple.TextEdit",
+                "com.apple.Safari",
+                "com.apple.Terminal",
+                "com.microsoft.VSCode",
+                "com.apple.dt.Xcode"
+            ]
+        }
+
+        guard let raw = env["DOCKACTIONER_APPEXPOSE_CARTESIAN_TARGETS"], !raw.isEmpty else {
+            return defaults
+        }
+
+        let parsed = raw
+            .split { $0 == "," || $0 == ";" || $0 == " " || $0 == "\n" || $0 == "\t" }
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var seen = Set<String>()
+        let unique = parsed.filter { seen.insert($0).inserted }
+        return unique.isEmpty ? defaults : unique
+    }
+
+    private func createAppExposeCartesianArtifacts() -> AppExposeCartesianArtifacts? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let stamp = formatter.string(from: Date())
+
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("tools/artifacts/app_expose-cartesian-\(stamp)")
+
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            let scenarios = root.appendingPathComponent("scenarios.jsonl")
+            let failures = root.appendingPathComponent("failures.jsonl")
+            let timeline = root.appendingPathComponent("timeline.log")
+            let summary = root.appendingPathComponent("summary.json")
+            let repro = root.appendingPathComponent("repro.md")
+
+            FileManager.default.createFile(atPath: scenarios.path, contents: nil)
+            FileManager.default.createFile(atPath: failures.path, contents: nil)
+            FileManager.default.createFile(atPath: timeline.path, contents: nil)
+
+            return AppExposeCartesianArtifacts(rootDirectory: root,
+                                               scenariosJSONL: scenarios,
+                                               failuresJSONL: failures,
+                                               timelineLog: timeline,
+                                               summaryJSON: summary,
+                                               reproMarkdown: repro)
+        } catch {
+            Logger.log("Failed to create cartesian artifacts: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func appendLine(_ line: String, to url: URL) {
+        let data = (line + "\n").data(using: .utf8) ?? Data()
+        if let handle = try? FileHandle(forWritingTo: url) {
+            do {
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+                try handle.close()
+                return
+            } catch {
+                try? handle.close()
+            }
+        }
+
+        if FileManager.default.fileExists(atPath: url.path),
+           let existing = try? Data(contentsOf: url) {
+            var merged = existing
+            merged.append(data)
+            try? merged.write(to: url, options: .atomic)
+        } else {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    private func jsonLine<T: Encodable>(_ value: T) -> String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        guard let data = try? encoder.encode(value),
+              let json = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return json
+    }
+
+    private func writeJSONObject<T: Encodable>(_ value: T, to url: URL) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        if let data = try? encoder.encode(value) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    private func writeAppExposeReproMarkdown(histories: [ScenarioHistory],
+                                             artifacts: AppExposeCartesianArtifacts,
+                                             rerunIterations: Int) {
+        var lines: [String] = []
+        lines.append("# App Expose Cartesian Repro Report")
+        lines.append("")
+        lines.append("- Generated: \(iso8601String(Date()))")
+        lines.append("- Artifact directory: \(artifacts.rootDirectory.path)")
+        lines.append("- Isolated reruns per failed scenario: \(rerunIterations)")
+        lines.append("")
+        lines.append("## Top deterministic repros")
+        lines.append("")
+
+        if histories.isEmpty {
+            lines.append("No deterministic failures identified.")
+        } else {
+            for (index, history) in histories.prefix(20).enumerated() {
+                lines.append("\(index + 1). `\(history.scenario.id)`")
+                lines.append("   - Tuple: `\(scenarioTuple(history.scenario))`")
+                lines.append("   - Family: `\(history.scenario.family)`")
+                lines.append("   - Failures: \(history.failures)/\(history.runs)")
+                let sample = history.failureSamples.first ?? "no detail"
+                lines.append("   - Sample failure: \(sample)")
+                lines.append("   - Repro command: `DOCKACTIONER_APPEXPOSE_CARTESIAN_TEST=1 DOCKACTIONER_APPEXPOSE_CARTESIAN_SCENARIO_ID=\"\(history.scenario.id)\" \".build/Build/Products/Debug/DockActioner.app/Contents/MacOS/DockActioner\"`")
+                lines.append("")
+            }
+        }
+
+        let text = lines.joined(separator: "\n")
+        try? text.data(using: .utf8)?.write(to: artifacts.reproMarkdown, options: .atomic)
+    }
+
+    private func iso8601String(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    private func percentile95(values: [Double]) -> Double? {
+        guard !values.isEmpty else { return nil }
+        let sorted = values.sorted()
+        let index = Int((Double(sorted.count - 1) * 0.95).rounded())
+        return sorted[max(0, min(index, sorted.count - 1))]
+    }
+
+    private func isExposeTrackingActive() -> Bool {
+        appExposeInvocationToken != nil || lastTriggeredBundle != nil || currentExposeApp != nil
+    }
+
+    private func expectedTrackingStateAfterInExposeAction(_ action: ScenarioInExposeAction) -> Bool {
+        switch action {
+        case .clickOtherAppDockIcon, .noInputTimeout3s:
+            return true
+        case .selectTargetWindow, .clickNegativeSpace, .pressEscape, .clickSameAppDockIcon, .cmdTabOtherApp:
+            return false
+        }
+    }
+
+    private func prepareScenarioWindowState(_ state: ScenarioWindowState,
+                                            targetBundle: String) async -> ScenarioWindowPreparation {
+        await ensureAppRunningForFirstClickTest(bundleIdentifier: targetBundle)
+        _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: targetBundle)
+        try? await Task.sleep(nanoseconds: 180_000_000)
+
+        switch state {
+        case .zeroWindows:
+            await closeFrontWindows(for: targetBundle, maxAttempts: 6)
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        case .oneWindow:
+            await ensureAtLeastWindows(for: targetBundle, count: 1)
+            await closeExtraWindows(for: targetBundle, keep: 1, maxAttempts: 6)
+        case .twoPlusWindows:
+            await ensureAtLeastWindows(for: targetBundle, count: 2)
+        case .twoPlusHiddenWindows:
+            await ensureAtLeastWindows(for: targetBundle, count: 2)
+            _ = WindowManager.hideAllWindows(bundleIdentifier: targetBundle)
+        case .twoPlusMinimizedWindows:
+            await ensureAtLeastWindows(for: targetBundle, count: 2)
+            _ = WindowManager.minimizeAllWindows(bundleIdentifier: targetBundle)
+        }
+
+        try? await Task.sleep(nanoseconds: 150_000_000)
+
+        let total = WindowManager.totalWindowCount(bundleIdentifier: targetBundle)
+        let hidden = WindowManager.isAppHidden(bundleIdentifier: targetBundle)
+        let minimizedCount = minimizedWindowCount(bundleIdentifier: targetBundle)
+        let allMinimized = total > 0 && minimizedCount == total
+
+        let achieved: Bool
+        switch state {
+        case .zeroWindows:
+            achieved = total == 0
+        case .oneWindow:
+            achieved = total == 1
+        case .twoPlusWindows:
+            achieved = total >= 2
+        case .twoPlusHiddenWindows:
+            achieved = total >= 2 && hidden
+        case .twoPlusMinimizedWindows:
+            achieved = total >= 2 && allMinimized
+        }
+
+        let detail = "requested=\(state.rawValue) total=\(total) hidden=\(hidden) minimized=\(minimizedCount) achieved=\(achieved)"
+        return ScenarioWindowPreparation(requested: state,
+                                         observedTotalWindows: total,
+                                         observedHidden: hidden,
+                                         observedAllMinimized: allMinimized,
+                                         achieved: achieved,
+                                         detail: detail)
+    }
+
+    private func minimizedWindowCount(bundleIdentifier: String) -> Int {
+        guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleIdentifier }) else {
+            return 0
+        }
+
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        var windows: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windows) == .success,
+              let windowsArray = windows as? [AXUIElement] else {
+            return 0
+        }
+
+        var minimized = 0
+        for window in windowsArray {
+            var minimizedValue: CFTypeRef?
+            if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimizedValue) == .success,
+               let isMinimized = minimizedValue as? Bool,
+               isMinimized {
+                minimized += 1
+            }
+        }
+        return minimized
+    }
+
+    private func closeFrontWindows(for bundleIdentifier: String, maxAttempts: Int) async {
+        _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: bundleIdentifier)
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        for _ in 0..<maxAttempts {
+            if WindowManager.totalWindowCount(bundleIdentifier: bundleIdentifier) == 0 {
+                return
+            }
+            postKeyboardShortcut(keyCode: 13, flags: [.maskCommand]) // Cmd+W
+            try? await Task.sleep(nanoseconds: 120_000_000)
+        }
+    }
+
+    private func closeExtraWindows(for bundleIdentifier: String, keep: Int, maxAttempts: Int) async {
+        _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: bundleIdentifier)
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        for _ in 0..<maxAttempts {
+            let total = WindowManager.totalWindowCount(bundleIdentifier: bundleIdentifier)
+            if total <= keep {
+                return
+            }
+            postKeyboardShortcut(keyCode: 13, flags: [.maskCommand]) // Cmd+W
+            try? await Task.sleep(nanoseconds: 120_000_000)
+        }
+    }
+
+    private func ensureAtLeastWindows(for bundleIdentifier: String, count: Int) async {
+        _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: bundleIdentifier)
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        let needsTextEditWindowShortcut = bundleIdentifier == "com.apple.TextEdit" && count > 1
+        var previousTotal = WindowManager.totalWindowCount(bundleIdentifier: bundleIdentifier)
+        var stagnantAttempts = 0
+        if previousTotal >= count {
+            return
+        }
+
+        for _ in 0..<8 {
+            if needsTextEditWindowShortcut {
+                postKeyboardShortcut(keyCode: 45, flags: [.maskCommand, .maskAlternate]) // Cmd+Option+N
+            } else {
+                postKeyboardShortcut(keyCode: 45, flags: [.maskCommand]) // Cmd+N
+            }
+            try? await Task.sleep(nanoseconds: 170_000_000)
+
+            let total = WindowManager.totalWindowCount(bundleIdentifier: bundleIdentifier)
+            if total >= count {
+                return
+            }
+
+            if total <= previousTotal {
+                stagnantAttempts += 1
+            } else {
+                stagnantAttempts = 0
+            }
+            previousTotal = max(previousTotal, total)
+
+            // Prevent keyboard-alert spam when app/window mode cannot satisfy requested count.
+            if stagnantAttempts >= 3 {
+                return
+            }
+        }
+    }
+
+    private func postKeyboardShortcut(keyCode: CGKeyCode, flags: CGEventFlags) {
+        guard let source = CGEventSource(stateID: .combinedSessionState) else { return }
+        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
+        keyDown?.flags = flags
+        keyUp?.flags = flags
+        keyDown?.post(tap: .cghidEventTap)
+        keyUp?.post(tap: .cghidEventTap)
+    }
+
+    private func postCommandTabSwitch() {
+        postKeyboardShortcut(keyCode: 48, flags: [.maskCommand]) // Cmd+Tab
+    }
+
+    private func mainDisplayNegativeSpacePoint() -> CGPoint {
+        let bounds = CGDisplayBounds(CGMainDisplayID())
+        return CGPoint(x: bounds.midX, y: bounds.midY)
+    }
+
+    private func resolveAlternateBundle(for targetBundle: String, targetPool: [String]) async -> String? {
+        for bundle in targetPool where bundle != targetBundle {
+            await ensureAppRunningForFirstClickTest(bundleIdentifier: bundle)
+            if resolveCartesianDockIconPoint(bundleIdentifier: bundle) != nil {
+                return bundle
+            }
+        }
+
+        let selfBundle = Bundle.main.bundleIdentifier
+        if let app = NSWorkspace.shared.runningApplications.first(where: {
+            $0.activationPolicy == .regular
+                && $0.bundleIdentifier != targetBundle
+                && $0.bundleIdentifier != selfBundle
+        }),
+           let bundle = app.bundleIdentifier {
+            await ensureAppRunningForFirstClickTest(bundleIdentifier: bundle)
+            if resolveCartesianDockIconPoint(bundleIdentifier: bundle) != nil {
+                return bundle
+            }
+        }
+
+        return nil
+    }
+
+    private func resolveCartesianDockIconPoint(bundleIdentifier: String) -> CGPoint? {
+        if let cached = cartesianDockPointCache[bundleIdentifier] {
+            if bundleIdentifierNearPoint(cached) == bundleIdentifier {
+                return cached
+            }
+            if let refreshed = firstClickAppExposeLiveDockPoint(for: bundleIdentifier, around: cached) {
+                cartesianDockPointCache[bundleIdentifier] = refreshed
+                return refreshed
+            }
+            cartesianDockPointCache.removeValue(forKey: bundleIdentifier)
+        }
+
+        // Keep cartesian runs moving even if Dock hit-testing is degraded.
+        guard let discovered = findDockIconPoint(bundleIdentifier: bundleIdentifier, maxDuration: 4.0) else {
+            return nil
+        }
+        cartesianDockPointCache[bundleIdentifier] = discovered
+        return discovered
+    }
+
+    private func resolveCartesianClickPoint(bundleIdentifier: String,
+                                            requestedPoint: CGPoint) -> CGPoint? {
+        if bundleIdentifierNearPoint(requestedPoint) == bundleIdentifier {
+            cartesianDockPointCache[bundleIdentifier] = requestedPoint
+            return requestedPoint
+        }
+
+        if let cached = cartesianDockPointCache[bundleIdentifier] {
+            if bundleIdentifierNearPoint(cached) == bundleIdentifier {
+                return cached
+            }
+            if let refreshedFromCache = firstClickAppExposeLiveDockPoint(for: bundleIdentifier, around: cached) {
+                cartesianDockPointCache[bundleIdentifier] = refreshedFromCache
+                return refreshedFromCache
+            }
+        }
+
+        if let refreshedFromRequested = firstClickAppExposeLiveDockPoint(for: bundleIdentifier, around: requestedPoint) {
+            cartesianDockPointCache[bundleIdentifier] = refreshedFromRequested
+            return refreshedFromRequested
+        }
+
+        if let discovered = findDockIconPoint(bundleIdentifier: bundleIdentifier, maxDuration: 1.5) {
+            cartesianDockPointCache[bundleIdentifier] = discovered
+            return discovered
+        }
+
+        return nil
+    }
+
+    private func robustDockClickPoint(bundleIdentifier: String, around seed: CGPoint) -> CGPoint? {
+        let deltas: [CGFloat] = [-16, -12, -8, -4, 0, 4, 8, 12, 16]
+        var bestPoint: CGPoint?
+        var bestScore = -1
+
+        for dy in deltas {
+            for dx in deltas {
+                let candidate = CGPoint(x: seed.x + dx, y: seed.y + dy)
+                if bundleIdentifierNearPoint(candidate) != bundleIdentifier {
+                    continue
+                }
+
+                let score = dockBundleMatchScore(bundleIdentifier: bundleIdentifier, at: candidate)
+                if score > bestScore {
+                    bestScore = score
+                    bestPoint = candidate
+                }
+            }
+        }
+
+        return bestPoint
+    }
+
+    private func dockBundleMatchScore(bundleIdentifier: String, at point: CGPoint) -> Int {
+        let sample: [CGFloat] = [-6, 0, 6]
+        var score = 0
+        for dy in sample {
+            for dx in sample {
+                let samplePoint = CGPoint(x: point.x + dx, y: point.y + dy)
+                if DockHitTest.bundleIdentifierAtPoint(samplePoint) == bundleIdentifier {
+                    score += 1
+                }
+            }
+        }
+        return score
+    }
+
+    private func primeScenarioFocusState(_ state: ScenarioFocusState,
+                                         targetBundle: String,
+                                         alternateBundle: String?) async {
+        switch state {
+        case .targetFrontmost:
+            _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: targetBundle)
+        case .otherAppFrontmost:
+            if let alternateBundle {
+                _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: alternateBundle)
+            } else {
+                makeNonTargetAppFrontmost(targetBundle: targetBundle)
+            }
+        case .targetHidden:
+            _ = WindowManager.hideAllWindows(bundleIdentifier: targetBundle)
+            if let alternateBundle {
+                _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: alternateBundle)
+            } else {
+                makeNonTargetAppFrontmost(targetBundle: targetBundle)
+            }
+        }
+        try? await Task.sleep(nanoseconds: 160_000_000)
+    }
+
+    private func performScenarioInExposeAction(_ action: ScenarioInExposeAction,
+                                               targetBundle: String,
+                                               targetPoint: CGPoint,
+                                               alternateBundle: String?,
+                                               alternatePoint: CGPoint?) async -> ScenarioActionOutcome {
+        switch action {
+        case .selectTargetWindow:
+            _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: targetBundle)
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            return ScenarioActionOutcome(ok: true, detail: "selected target window")
+        case .clickNegativeSpace:
+            let point = mainDisplayNegativeSpacePoint()
+            postSyntheticMouseMove(to: point)
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            postSyntheticClick(at: point)
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            return ScenarioActionOutcome(ok: true, detail: "clicked negative space at (\(Int(point.x)),\(Int(point.y)))")
+        case .pressEscape:
+            exitAppExpose()
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            return ScenarioActionOutcome(ok: true, detail: "pressed escape")
+        case .clickSameAppDockIcon:
+            let click = await performCartesianDockClick(bundleIdentifier: targetBundle, at: targetPoint)
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            return ScenarioActionOutcome(ok: click.sent, detail: "clicked same app dock icon \(click.summary)")
+        case .clickOtherAppDockIcon:
+            guard let alternatePoint, let alternateBundle else {
+                return ScenarioActionOutcome(ok: false, detail: "alternate dock icon unavailable")
+            }
+            let click = await performCartesianDockClick(bundleIdentifier: alternateBundle, at: alternatePoint)
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            return ScenarioActionOutcome(ok: click.sent, detail: "clicked other app dock icon (\(alternateBundle)) \(click.summary)")
+        case .cmdTabOtherApp:
+            postCommandTabSwitch()
+            try? await Task.sleep(nanoseconds: 240_000_000)
+            return ScenarioActionOutcome(ok: true, detail: "issued cmd+tab")
+        case .noInputTimeout3s:
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            return ScenarioActionOutcome(ok: true, detail: "waited 3s without input")
+        }
+    }
+
+    private func performScenarioPostExitAction(action: ScenarioPostExitAction,
+                                               depth: ScenarioReentryDepth,
+                                               targetBundle: String,
+                                               targetPoint: CGPoint,
+                                               alternateBundle: String?,
+                                               alternatePoint: CGPoint?) async -> ScenarioActionOutcome {
+        let sequence = postExitActionSequence(base: action, depth: depth)
+        var details: [String] = []
+
+        for stepAction in sequence {
+            let result = await performSingleScenarioPostExitAction(stepAction,
+                                                                   targetBundle: targetBundle,
+                                                                   targetPoint: targetPoint,
+                                                                   alternateBundle: alternateBundle,
+                                                                   alternatePoint: alternatePoint)
+            details.append(result.detail)
+            if !result.ok {
+                return ScenarioActionOutcome(ok: false, detail: details.joined(separator: "; "))
+            }
+        }
+
+        return ScenarioActionOutcome(ok: true, detail: details.joined(separator: "; "))
+    }
+
+    private func postExitActionSequence(base: ScenarioPostExitAction,
+                                        depth: ScenarioReentryDepth) -> [ScenarioPostExitAction] {
+        switch depth {
+        case .single:
+            return [base]
+        case .doubleImmediate:
+            return [base, base]
+        case .tripleAlternating:
+            return [base, alternatePostExitAction(for: base), base]
+        }
+    }
+
+    private func alternatePostExitAction(for action: ScenarioPostExitAction) -> ScenarioPostExitAction {
+        switch action {
+        case .clickSameAppIcon:
+            return .clickOtherAppIcon
+        case .clickOtherAppIcon:
+            return .clickSameAppIcon
+        case .clickTargetWindow:
+            return .clickOtherAppIcon
+        case .reenterAppExposeSameApp:
+            return .reenterAppExposeAfterSwitch
+        case .reenterAppExposeAfterSwitch:
+            return .reenterAppExposeSameApp
+        }
+    }
+
+    private func performSingleScenarioPostExitAction(_ action: ScenarioPostExitAction,
+                                                     targetBundle: String,
+                                                     targetPoint: CGPoint,
+                                                     alternateBundle: String?,
+                                                     alternatePoint: CGPoint?) async -> ScenarioActionOutcome {
+        switch action {
+        case .clickSameAppIcon:
+            let latency = await clickDockIconAndMeasureLatency(point: targetPoint,
+                                                               expectedBundle: targetBundle)
+            return ScenarioActionOutcome(ok: latency != nil,
+                                         detail: latency.map { String(format: "click same app latency=%.1fms", $0) } ?? "click same app latency=nil")
+        case .clickOtherAppIcon:
+            guard let alternateBundle, let alternatePoint else {
+                return ScenarioActionOutcome(ok: false, detail: "alternate dock icon unavailable")
+            }
+            let latency = await clickDockIconAndMeasureLatency(point: alternatePoint,
+                                                               expectedBundle: alternateBundle)
+            return ScenarioActionOutcome(ok: latency != nil,
+                                         detail: latency.map { String(format: "click other app latency=%.1fms", $0) } ?? "click other app latency=nil")
+        case .clickTargetWindow:
+            let activated = WindowManager.activateAndShowMainWindow(bundleIdentifier: targetBundle)
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            return ScenarioActionOutcome(ok: activated,
+                                         detail: "activate target window \(activated)")
+        case .reenterAppExposeSameApp:
+            let ok = await attemptReentry(targetBundle: targetBundle,
+                                          targetPoint: targetPoint,
+                                          alternateBundle: alternateBundle,
+                                          alternatePoint: alternatePoint,
+                                          switchBeforeReenter: false)
+            return ScenarioActionOutcome(ok: ok, detail: "reenter same app \(ok)")
+        case .reenterAppExposeAfterSwitch:
+            let ok = await attemptReentry(targetBundle: targetBundle,
+                                          targetPoint: targetPoint,
+                                          alternateBundle: alternateBundle,
+                                          alternatePoint: alternatePoint,
+                                          switchBeforeReenter: true)
+            return ScenarioActionOutcome(ok: ok, detail: "reenter after switch \(ok)")
+        }
+    }
+
+    private func attemptReentry(targetBundle: String,
+                                targetPoint: CGPoint,
+                                alternateBundle: String?,
+                                alternatePoint: CGPoint?,
+                                switchBeforeReenter: Bool) async -> Bool {
+        if switchBeforeReenter {
+            if let alternatePoint, let alternateBundle {
+                let switched = await performCartesianDockClick(bundleIdentifier: alternateBundle, at: alternatePoint)
+                if !switched.sent {
+                    return false
+                }
+                try? await Task.sleep(nanoseconds: 160_000_000)
+            } else {
+                makeNonTargetAppFrontmost(targetBundle: targetBundle)
+                try? await Task.sleep(nanoseconds: 140_000_000)
+            }
+        } else {
+            if let alternateBundle {
+                _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: alternateBundle)
+            } else {
+                makeNonTargetAppFrontmost(targetBundle: targetBundle)
+            }
+            try? await Task.sleep(nanoseconds: 140_000_000)
+        }
+
+        let baseline = lastActionExecutedAt ?? Date.distantPast
+        let click = await performCartesianDockClick(bundleIdentifier: targetBundle, at: targetPoint)
+        guard click.sent else {
+            return false
+        }
+        let dispatched = await waitForAppExposeDispatch(expectedBundle: targetBundle,
+                                                        baseline: baseline,
+                                                        timeout: 1.3)
+        if dispatched {
+            exitAppExpose()
+            try? await Task.sleep(nanoseconds: 120_000_000)
+        }
+        return dispatched
+    }
+
+    private func waitForAppExposeDispatch(expectedBundle: String,
+                                          baseline: Date,
+                                          timeout: TimeInterval) async -> Bool {
+        let started = Date()
+        while Date().timeIntervalSince(started) < timeout {
+            if let at = lastActionExecutedAt,
+               at > baseline,
+               lastActionExecuted == .appExpose,
+               lastActionExecutedBundle == expectedBundle {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 35_000_000)
+        }
+        return false
+    }
+
+    private func waitForAnyDispatch(expectedBundle: String?,
+                                    baseline: Date,
+                                    timeout: TimeInterval) async -> Bool {
+        let started = Date()
+        while Date().timeIntervalSince(started) < timeout {
+            if let at = lastActionExecutedAt, at > baseline {
+                if let expectedBundle {
+                    if lastActionExecutedBundle == expectedBundle {
+                        return true
+                    }
+                } else {
+                    return true
+                }
+            }
+            try? await Task.sleep(nanoseconds: 35_000_000)
+        }
+        return false
+    }
+
+    private func waitForAppExposeTrigger(expectedBundle: String,
+                                         baseline: Date,
+                                         timeout: TimeInterval) async -> Bool {
+        let started = Date()
+        while Date().timeIntervalSince(started) < timeout {
+            if let at = lastActionExecutedAt,
+               at > baseline,
+               lastActionExecuted == .appExpose,
+               lastActionExecutedBundle == expectedBundle {
+                return true
+            }
+
+            // Fallback state-based signal in case source classification differs from "firstClick".
+            if lastTriggeredBundle == expectedBundle || currentExposeApp == expectedBundle {
+                return true
+            }
+
+            try? await Task.sleep(nanoseconds: 35_000_000)
+        }
+        return false
+    }
+
+    private func cartesianDirectClickModeEnabled() -> Bool {
+        let profileRaw = ProcessInfo.processInfo.environment["DOCKACTIONER_APPEXPOSE_CARTESIAN_PROFILE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if profileRaw == AppExposeCartesianProfile.focused.rawValue {
+            return false
+        }
+
+        let raw = ProcessInfo.processInfo.environment["DOCKACTIONER_APPEXPOSE_CARTESIAN_DIRECT_CLICKS"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        return raw == "1" || raw == "true" || raw == "yes"
+    }
+
+    private func performCartesianDockClick(bundleIdentifier: String, at point: CGPoint) async -> CartesianClickDispatchResult {
+        var requestedPoint = point
+        var clickPoint: CGPoint?
+        for _ in 0..<3 {
+            guard let resolved = resolveCartesianClickPoint(bundleIdentifier: bundleIdentifier,
+                                                            requestedPoint: requestedPoint) else {
+                try? await Task.sleep(nanoseconds: 80_000_000)
+                continue
+            }
+            postSyntheticMouseMove(to: resolved)
+            try? await Task.sleep(nanoseconds: 60_000_000)
+            if let robust = robustDockClickPoint(bundleIdentifier: bundleIdentifier, around: resolved) {
+                clickPoint = robust
+                break
+            }
+            requestedPoint = resolved
+            try? await Task.sleep(nanoseconds: 60_000_000)
+        }
+
+        guard let clickPoint else {
+            Logger.debug("CARTESIAN: failed to validate Dock click point for \(bundleIdentifier)")
+            return CartesianClickDispatchResult(sent: false,
+                                                expectedBundle: bundleIdentifier,
+                                                clickPoint: nil,
+                                                observedDownBundle: nil,
+                                                observedUpBundle: nil,
+                                                observedDownMs: nil,
+                                                observedUpMs: nil,
+                                                mode: "real")
+        }
+
+        if cartesianDirectClickModeEnabled() {
+            let frontmostBefore = FrontmostAppTracker.frontmostBundleIdentifier()
+            let context = PendingClickContext(location: clickPoint,
+                                              buttonNumber: 0,
+                                              flags: [],
+                                              frontmostBefore: frontmostBefore,
+                                              clickedBundle: bundleIdentifier,
+                                              consumeClick: false)
+            let consumed = executeClickAction(context)
+            if !consumed {
+                _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: bundleIdentifier)
+                lastActionExecuted = .activateApp
+                lastActionExecutedBundle = bundleIdentifier
+                lastActionExecutedSource = "directDockFallback"
+                lastActionExecutedAt = Date()
+            }
+            try? await Task.sleep(nanoseconds: 40_000_000)
+            return CartesianClickDispatchResult(sent: true,
+                                                expectedBundle: bundleIdentifier,
+                                                clickPoint: clickPoint,
+                                                observedDownBundle: nil,
+                                                observedUpBundle: nil,
+                                                observedDownMs: nil,
+                                                observedUpMs: nil,
+                                                mode: "direct")
+        }
+
+        let token = beginCartesianClickProbe(expectedBundle: bundleIdentifier)
+        postSyntheticClick(at: clickPoint)
+        let started = Date()
+        while Date().timeIntervalSince(started) < 0.45 {
+            if let probe = cartesianClickProbe,
+               probe.token == token,
+               probe.observedUpAt != nil {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        return finalizeCartesianClickProbe(token: token,
+                                           expectedBundle: bundleIdentifier,
+                                           clickPoint: clickPoint,
+                                           sent: true,
+                                           mode: "real")
+    }
+
+    private func beginCartesianClickProbe(expectedBundle: String) -> UUID {
+        let token = UUID()
+        cartesianClickProbe = CartesianClickProbe(token: token,
+                                                  expectedBundle: expectedBundle,
+                                                  startedAt: Date(),
+                                                  observedDownBundle: nil,
+                                                  observedDownAt: nil,
+                                                  observedUpBundle: nil,
+                                                  observedUpAt: nil)
+        return token
+    }
+
+    private func observeCartesianClickProbe(phase: ClickPhase, bundleAtPoint: String?) {
+        guard var probe = cartesianClickProbe else { return }
+        switch phase {
+        case .down:
+            if probe.observedDownAt == nil {
+                probe.observedDownAt = Date()
+                probe.observedDownBundle = bundleAtPoint
+            }
+        case .up:
+            if probe.observedUpAt == nil {
+                probe.observedUpAt = Date()
+                probe.observedUpBundle = bundleAtPoint
+            }
+        case .dragged:
+            break
+        }
+        cartesianClickProbe = probe
+    }
+
+    private func finalizeCartesianClickProbe(token: UUID,
+                                             expectedBundle: String,
+                                             clickPoint: CGPoint?,
+                                             sent: Bool,
+                                             mode: String) -> CartesianClickDispatchResult {
+        let probe: CartesianClickProbe?
+        if let current = cartesianClickProbe, current.token == token {
+            probe = current
+            cartesianClickProbe = nil
+        } else {
+            probe = nil
+        }
+
+        let downMs = probe.flatMap { probe -> Double? in
+            guard let downAt = probe.observedDownAt else { return nil }
+            return downAt.timeIntervalSince(probe.startedAt) * 1000.0
+        }
+        let upMs = probe.flatMap { probe -> Double? in
+            guard let upAt = probe.observedUpAt else { return nil }
+            return upAt.timeIntervalSince(probe.startedAt) * 1000.0
+        }
+
+        return CartesianClickDispatchResult(sent: sent,
+                                            expectedBundle: expectedBundle,
+                                            clickPoint: clickPoint,
+                                            observedDownBundle: probe?.observedDownBundle,
+                                            observedUpBundle: probe?.observedUpBundle,
+                                            observedDownMs: downMs,
+                                            observedUpMs: upMs,
+                                            mode: mode)
+    }
+
+    private func clickDockIconAndMeasureLatency(point: CGPoint,
+                                                expectedBundle: String) async -> Double? {
+        let baseline = Date()
+        let click = await performCartesianDockClick(bundleIdentifier: expectedBundle, at: point)
+        guard click.sent else {
+            return nil
+        }
+        let dispatched = await waitForAnyDispatch(expectedBundle: expectedBundle,
+                                                  baseline: baseline,
+                                                  timeout: 2.0)
+        guard dispatched, let at = lastActionExecutedAt else {
+            return nil
+        }
+        return at.timeIntervalSince(baseline) * 1000.0
+    }
+
+    private func validateScenarioReentry(depth: ScenarioReentryDepth,
+                                         targetBundle: String,
+                                         targetPoint: CGPoint,
+                                         alternateBundle: String?,
+                                         alternatePoint: CGPoint?) async -> Bool {
+        let attempts: Int
+        switch depth {
+        case .single:
+            attempts = 1
+        case .doubleImmediate:
+            attempts = 2
+        case .tripleAlternating:
+            attempts = 3
+        }
+
+        for index in 0..<attempts {
+            let switched = depth == .tripleAlternating ? (index % 2 == 0) : true
+            let ok = await attemptReentry(targetBundle: targetBundle,
+                                          targetPoint: targetPoint,
+                                          alternateBundle: alternateBundle,
+                                          alternatePoint: alternatePoint,
+                                          switchBeforeReenter: switched)
+            if !ok {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func probeScenarioDockResponsiveness(targetBundle: String,
+                                                 targetPoint: CGPoint,
+                                                 alternateBundle: String?,
+                                                 alternatePoint: CGPoint?) async -> Double? {
+        if let alternateBundle, let alternatePoint {
+            if let latency = await clickDockIconAndMeasureLatency(point: alternatePoint,
+                                                                  expectedBundle: alternateBundle) {
+                return latency
+            }
+        }
+        return await clickDockIconAndMeasureLatency(point: targetPoint, expectedBundle: targetBundle)
+    }
+
     private func runSingleAppExposeReentryIteration(index: Int,
                                                     total: Int,
                                                     targetBundle: String) async -> AppExposeReentryIterationResult {
@@ -778,7 +2857,8 @@ final class DockExposeCoordinator: ObservableObject {
     private func makeNonTargetAppFrontmost(targetBundle: String) {
         let selfBundle = Bundle.main.bundleIdentifier
 
-        if let finder = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.apple.finder" }) {
+        if targetBundle != "com.apple.finder",
+           let finder = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.apple.finder" }) {
             _ = finder.activate(options: [.activateIgnoringOtherApps])
             return
         }
@@ -792,7 +2872,7 @@ final class DockExposeCoordinator: ObservableObject {
         }
     }
 
-    func findDockIconPoint(bundleIdentifier: String) -> CGPoint? {
+    func findDockIconPoint(bundleIdentifier: String, maxDuration: TimeInterval? = nil) -> CGPoint? {
         var count: UInt32 = 0
         if CGGetActiveDisplayList(0, nil, &count) != .success || count == 0 {
             return nil
@@ -801,8 +2881,10 @@ final class DockExposeCoordinator: ObservableObject {
         if CGGetActiveDisplayList(count, &displays, &count) != .success {
             return nil
         }
+        let deadline = maxDuration.map { Date().addingTimeInterval($0) }
 
         for id in displays {
+            if let deadline, Date() > deadline { break }
             let b = CGDisplayBounds(id)
 
             // If the Dock is set to auto-hide, it may not be hittable unless the cursor is near the edge.
@@ -811,9 +2893,9 @@ final class DockExposeCoordinator: ObservableObject {
             postSyntheticMouseMove(to: CGPoint(x: b.maxX - 1, y: b.midY))
             usleep(60_000)
 
-            if let p = probeEdgeForBundle(bounds: b, edge: .bottom, bundleIdentifier: bundleIdentifier) { return p }
-            if let p = probeEdgeForBundle(bounds: b, edge: .left, bundleIdentifier: bundleIdentifier) { return p }
-            if let p = probeEdgeForBundle(bounds: b, edge: .right, bundleIdentifier: bundleIdentifier) { return p }
+            if let p = probeEdgeForBundle(bounds: b, edge: .bottom, bundleIdentifier: bundleIdentifier, deadline: deadline) { return p }
+            if let p = probeEdgeForBundle(bounds: b, edge: .left, bundleIdentifier: bundleIdentifier, deadline: deadline) { return p }
+            if let p = probeEdgeForBundle(bounds: b, edge: .right, bundleIdentifier: bundleIdentifier, deadline: deadline) { return p }
         }
         return nil
     }
@@ -822,7 +2904,7 @@ final class DockExposeCoordinator: ObservableObject {
         guard let source = CGEventSource(stateID: .hidSystemState) else { return }
         if let ev = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left) {
             ev.flags = []
-            ev.setIntegerValueField(.eventSourceUserData, value: 0xD0C0A11)
+            ev.setIntegerValueField(.eventSourceUserData, value: DockClickEventTap.syntheticClickUserData)
             ev.post(tap: .cghidEventTap)
         }
     }
@@ -1122,7 +3204,10 @@ final class DockExposeCoordinator: ObservableObject {
         return nil
     }
 
-    private func probeEdgeForBundle(bounds: CGRect, edge: Edge, bundleIdentifier: String) -> CGPoint? {
+    private func probeEdgeForBundle(bounds: CGRect,
+                                    edge: Edge,
+                                    bundleIdentifier: String,
+                                    deadline: Date? = nil) -> CGPoint? {
         let margin: CGFloat = 10
         let step: CGFloat = 16
         let startInset: CGFloat = 40
@@ -1133,8 +3218,10 @@ final class DockExposeCoordinator: ObservableObject {
         case .bottom:
             var y = bounds.maxY - margin
             while y > bounds.maxY - depth {
+                if let deadline, Date() > deadline { return nil }
                 var x = bounds.minX + startInset
                 while x < bounds.maxX - startInset {
+                    if let deadline, Date() > deadline { return nil }
                     let p = CGPoint(x: x, y: y)
                     if let bundle = bundleIdentifierNearPoint(p), bundle == bundleIdentifier {
                         return p
@@ -1146,8 +3233,10 @@ final class DockExposeCoordinator: ObservableObject {
         case .left:
             var x = bounds.minX + margin
             while x < bounds.minX + depth {
+                if let deadline, Date() > deadline { return nil }
                 var y = bounds.minY + startInset
                 while y < bounds.maxY - startInset {
+                    if let deadline, Date() > deadline { return nil }
                     let p = CGPoint(x: x, y: y)
                     if let bundle = bundleIdentifierNearPoint(p), bundle == bundleIdentifier {
                         return p
@@ -1159,8 +3248,10 @@ final class DockExposeCoordinator: ObservableObject {
         case .right:
             var x = bounds.maxX - margin
             while x > bounds.maxX - depth {
+                if let deadline, Date() > deadline { return nil }
                 var y = bounds.minY + startInset
                 while y < bounds.maxY - startInset {
+                    if let deadline, Date() > deadline { return nil }
                     let p = CGPoint(x: x, y: y)
                     if let bundle = bundleIdentifierNearPoint(p), bundle == bundleIdentifier {
                         return p
@@ -1177,14 +3268,25 @@ final class DockExposeCoordinator: ObservableObject {
         guard let source = CGEventSource(stateID: .hidSystemState) else { return }
         if let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left) {
             down.flags = []
-            down.setIntegerValueField(.eventSourceUserData, value: 0xD0C0A11)
+            down.setIntegerValueField(.eventSourceUserData, value: DockClickEventTap.syntheticClickUserData)
             down.post(tap: .cghidEventTap)
         }
         if let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) {
             up.flags = []
-            up.setIntegerValueField(.eventSourceUserData, value: 0xD0C0A11)
+            up.setIntegerValueField(.eventSourceUserData, value: DockClickEventTap.syntheticClickUserData)
             up.post(tap: .cghidEventTap)
         }
+    }
+
+    func postSyntheticMouseUpPassthrough(at point: CGPoint) {
+        guard let source = CGEventSource(stateID: .hidSystemState) else { return }
+        guard let up = CGEvent(mouseEventSource: source,
+                               mouseType: .leftMouseUp,
+                               mouseCursorPosition: point,
+                               mouseButton: .left) else { return }
+        up.flags = []
+        up.setIntegerValueField(.eventSourceUserData, value: DockClickEventTap.syntheticReleasePassthroughUserData)
+        up.post(tap: .cghidEventTap)
     }
 
     func postSyntheticScroll(at point: CGPoint, deltaY: Int32) {
@@ -1193,7 +3295,7 @@ final class DockExposeCoordinator: ObservableObject {
         ev.location = point
         ev.flags = []
         ev.setIntegerValueField(.scrollWheelEventIsContinuous, value: 0)
-        ev.setIntegerValueField(.eventSourceUserData, value: 0xD0C0A11)
+        ev.setIntegerValueField(.eventSourceUserData, value: DockClickEventTap.syntheticClickUserData)
         ev.post(tap: .cghidEventTap)
     }
 
@@ -1328,7 +3430,13 @@ final class DockExposeCoordinator: ObservableObject {
         switch phase {
         case .down:
             Logger.debug("WORKFLOW: Click down at \(location.x), \(location.y) button \(buttonNumber)")
-            guard let clickedBundle = DockHitTest.bundleIdentifierAtPoint(location) else {
+            let hitBundle = DockHitTest.bundleIdentifierAtPoint(location)
+            observeCartesianClickProbe(phase: .down, bundleAtPoint: hitBundle)
+            guard let clickedBundle = hitBundle else {
+                if lastTriggeredBundle != nil || currentExposeApp != nil {
+                    Logger.debug("WORKFLOW: Non-Dock click while App Exposé tracking active; resetting tracking state")
+                    resetExposeTracking()
+                }
                 pendingClickContext = nil
                 pendingClickWasDragged = false
                 return false
@@ -1353,7 +3461,8 @@ final class DockExposeCoordinator: ObservableObject {
                                                      clickedBundle: context.clickedBundle,
                                                      consumeClick: consumeClick)
             pendingClickWasDragged = false
-            return consumeClick
+            // Never consume mouse-down. Dock needs it to begin drag-reorder interactions.
+            return false
 
         case .dragged:
             if let context = pendingClickContext {
@@ -1364,6 +3473,10 @@ final class DockExposeCoordinator: ObservableObject {
             return false
 
         case .up:
+            if cartesianClickProbe != nil {
+                let hitBundle = DockHitTest.bundleIdentifierAtPoint(location)
+                observeCartesianClickProbe(phase: .up, bundleAtPoint: hitBundle)
+            }
             guard let context = pendingClickContext else {
                 return false
             }
@@ -1375,14 +3488,26 @@ final class DockExposeCoordinator: ObservableObject {
 
             if pendingClickWasDragged {
                 Logger.debug("WORKFLOW: Drag completed; allowing Dock drop behavior")
-                return context.consumeClick
+                return false
             }
 
             let consumeNow = executeClickAction(context)
             if consumeNow != context.consumeClick {
                 Logger.debug("WORKFLOW: Click consume mismatch planned=\(context.consumeClick) actual=\(consumeNow)")
             }
+            if context.consumeClick {
+                scheduleDockPressedStateRecovery(at: context.location, expectedBundle: context.clickedBundle)
+            }
             return context.consumeClick
+        }
+    }
+
+    private func scheduleDockPressedStateRecovery(at location: CGPoint, expectedBundle: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.012) { [weak self] in
+            guard let self else { return }
+            postSyntheticMouseMove(to: location)
+            postSyntheticMouseUpPassthrough(at: location)
+            Logger.debug("WORKFLOW: Posted passthrough mouse-up recovery for \(expectedBundle)")
         }
     }
 

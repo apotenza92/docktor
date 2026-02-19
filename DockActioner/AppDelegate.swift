@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             || env["DOCKACTIONER_APPEXPOSE_HOTKEY_TEST"] == "1"
             || env["DOCKACTIONER_FIRSTCLICK_APPEXPOSE_TEST"] == "1"
             || env["DOCKACTIONER_APPEXPOSE_REENTRY_TEST"] == "1"
+            || env["DOCKACTIONER_APPEXPOSE_CARTESIAN_TEST"] == "1"
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -93,6 +94,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 150.0) {
                 Logger.log("App Expose re-entry test timeout; terminating")
+                NSApp.terminate(nil)
+            }
+        }
+
+        if ProcessInfo.processInfo.environment["DOCKACTIONER_APPEXPOSE_CARTESIAN_TEST"] == "1" {
+            Logger.log("App Expose cartesian test enabled via DOCKACTIONER_APPEXPOSE_CARTESIAN_TEST=1")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                self?.coordinator.runAppExposeCartesianTestSuite()
+            }
+            let timeout = max(300.0, Double(ProcessInfo.processInfo.environment["DOCKACTIONER_APPEXPOSE_CARTESIAN_TIMEOUT_SECONDS"] ?? "28800") ?? 28800.0)
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+                Logger.log("App Expose cartesian test timeout; terminating")
                 NSApp.terminate(nil)
             }
         }
