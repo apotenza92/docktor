@@ -5,18 +5,20 @@
     <description>DockActioner update feed (stable channel)</description>
     <language>en</language>
     <item>
-      <title>Version 0.0.7</title>
-      <link>https://github.com/apotenza92/dock-actioner/releases/tag/v0.0.7</link>
-      <sparkle:version>790000</sparkle:version>
-      <sparkle:shortVersionString>0.0.7</sparkle:shortVersionString>
+      <title>Version 0.0.8</title>
+      <link>https://github.com/apotenza92/dock-actioner/releases/tag/v0.0.8</link>
+      <sparkle:version>890000</sparkle:version>
+      <sparkle:shortVersionString>0.0.8</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
       <sparkle:fullReleaseNotesLink>https://github.com/apotenza92/dock-actioner/blob/main/CHANGELOG.md</sparkle:fullReleaseNotesLink>
-      <description sparkle:format="plain-text"><![CDATA[- Fixed first-click App Expose interception so when `>1 window only` is off, repeated first clicks on running apps continue dispatching App Expose instead of falling back to Dock activation.
-- Added/validated automated first-click and App Expose re-entry regression coverage for this flow.]]></description>
-      <pubDate>Wed, 18 Feb 2026 05:46:22 +0000</pubDate>
-      <enclosure url="https://github.com/apotenza92/dock-actioner/releases/download/v0.0.7/DockActioner-v0.0.7-macos-x64.zip"
-                 sparkle:edSignature="0jV9XTm1d3FOxUEXMp1JOw01I2bZYs8r+0W9xo2JVqqZmtAOQ5rQS3CdmfgLK+8sZBCOSSo6iE/xfl5266IJDg=="
-                 length="4477784"
+      <description sparkle:format="plain-text"><![CDATA[- Added a focused App Expose cartesian harness profile (Finder + TextEdit) with machine-readable artifacts and deterministic scenario IDs for gate/cancel reliability testing.
+- Hardened Dock click targeting in cartesian runs with cached/revalidated icon points and per-click down/up bundle probes to distinguish hit-test misses from trigger failures.
+- Fixed negative-space cancel tracking reset so consumed/non-Dock clicks clear App Expose tracking state correctly and reduce stuck cancel flows.
+- Added recovery for consumed click-up paths by posting passthrough synthetic mouse-up events, reducing Dock icons getting visually stuck in a pressed/greyed state.]]></description>
+      <pubDate>Thu, 19 Feb 2026 05:26:57 +0000</pubDate>
+      <enclosure url="https://github.com/apotenza92/dock-actioner/releases/download/v0.0.8/DockActioner-v0.0.8-macos-x64.zip"
+                 sparkle:edSignature="OtnVptQTG2FdZaBFMYDBibKGdEp4z559YcJxF8UQHLhnaNvYkFJt7qxiUvaVHaZvwxRiUe+Fwcm0sUllt5PdBA=="
+                 length="4604129"
                  type="application/octet-stream" />
     </item>
   </channel>
