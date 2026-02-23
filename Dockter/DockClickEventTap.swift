@@ -20,6 +20,7 @@ final class DockClickEventTap {
     private var clickHandler: ((CGPoint, Int, CGEventFlags, ClickPhase) -> Bool)? // Returns true if event should be consumed
     private var scrollHandler: ((CGPoint, ScrollDirection, CGEventFlags) -> Bool)? // Returns true if event should be consumed
     private var anyEventHandler: ((CGEventType) -> Void)?
+    private var syntheticReleaseHandler: (() -> Void)?
 
     private(set) var lastStartError: String?
 
@@ -35,12 +36,14 @@ final class DockClickEventTap {
     func start(
         clickHandler: @escaping (CGPoint, Int, CGEventFlags, ClickPhase) -> Bool,
         scrollHandler: @escaping (CGPoint, ScrollDirection, CGEventFlags) -> Bool,
-        anyEventHandler: ((CGEventType) -> Void)? = nil
+        anyEventHandler: ((CGEventType) -> Void)? = nil,
+        syntheticReleaseHandler: (() -> Void)? = nil
     ) -> Bool {
         stop()
         self.clickHandler = clickHandler
         self.scrollHandler = scrollHandler
         self.anyEventHandler = anyEventHandler
+        self.syntheticReleaseHandler = syntheticReleaseHandler
         self.lastStartError = nil
 
         // Capture both mouse clicks and scroll wheel events
@@ -90,14 +93,18 @@ final class DockClickEventTap {
         }
 
         eventTap = tap
-        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        if let source = runLoopSource {
-            CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-            CGEvent.tapEnable(tap: tap, enable: true)
-            Logger.log("Event tap run loop source added and enabled.")
-        } else {
+        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             lastStartError = "Failed to create run loop source for event tap"
+            CGEvent.tapEnable(tap: tap, enable: false)
+            eventTap = nil
+            runLoopSource = nil
+            return false
         }
+
+        runLoopSource = source
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        Logger.log("Event tap run loop source added and enabled.")
         return true
     }
 
@@ -115,6 +122,7 @@ final class DockClickEventTap {
         clickHandler = nil
         scrollHandler = nil
         anyEventHandler = nil
+        syntheticReleaseHandler = nil
         continuousScrollActive = false
         continuousScrollConsume = false
         lastContinuousScrollTime = 0
@@ -127,6 +135,7 @@ final class DockClickEventTap {
     private func didReceiveClick(event: CGEvent, phase: ClickPhase) -> Bool {
         let sourceUserData = event.getIntegerValueField(.eventSourceUserData)
         if sourceUserData == DockClickEventTap.syntheticReleasePassthroughUserData {
+            syntheticReleaseHandler?()
             Logger.debug("DockClickEventTap: Passthrough synthetic release event")
             return false
         }

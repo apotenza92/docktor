@@ -6,17 +6,17 @@
     <language>en</language>
     <item>
       <title>Version 0.0.8</title>
-      <link>https://github.com/apotenza92/dock-actioner/releases/tag/v0.0.8</link>
+      <link>https://github.com/apotenza92/dockter/releases/tag/v0.0.8</link>
       <sparkle:version>890000</sparkle:version>
       <sparkle:shortVersionString>0.0.8</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <sparkle:fullReleaseNotesLink>https://github.com/apotenza92/dock-actioner/blob/main/CHANGELOG.md</sparkle:fullReleaseNotesLink>
+      <sparkle:fullReleaseNotesLink>https://github.com/apotenza92/dockter/blob/main/CHANGELOG.md</sparkle:fullReleaseNotesLink>
       <description sparkle:format="plain-text"><![CDATA[- Added a focused App Expose cartesian harness profile (Finder + TextEdit) with machine-readable artifacts and deterministic scenario IDs for gate/cancel reliability testing.
 - Hardened Dock click targeting in cartesian runs with cached/revalidated icon points and per-click down/up bundle probes to distinguish hit-test misses from trigger failures.
 - Fixed negative-space cancel tracking reset so consumed/non-Dock clicks clear App Expose tracking state correctly and reduce stuck cancel flows.
 - Added recovery for consumed click-up paths by posting passthrough synthetic mouse-up events, reducing Dock icons getting visually stuck in a pressed/greyed state.]]></description>
       <pubDate>Thu, 19 Feb 2026 08:52:43 +0000</pubDate>
-      <enclosure url="https://github.com/apotenza92/dock-actioner/releases/download/v0.0.8/DockActioner-Beta-v0.0.8-macos-arm64.zip"
+      <enclosure url="https://github.com/apotenza92/dockter/releases/download/v0.0.8/DockActioner-Beta-v0.0.8-macos-arm64.zip"
                  sparkle:edSignature="SPHfXRyFIr1Z6mhR/qqAn76K4p8EKNStkgEVWNZhUVKJCVQOvo/1q2FKKd3cB2uNQiql9Crd3TY1u0BxqOwCDQ=="
                  length="2796271"
                  type="application/octet-stream" />

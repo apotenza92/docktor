@@ -1,6 +1,6 @@
-# DockActioner
+# Dockter
 
-DockActioner is a lightweight macOS menu bar app that adds gesture actions to Dock icons.
+Dockter is a lightweight macOS menu bar app that adds gesture actions to Dock icons.
 
 - Click action defaults to **App Expose**.
 - Scroll down defaults to **Hide App**.
@@ -20,26 +20,26 @@ DockActioner is a lightweight macOS menu bar app that adds gesture actions to Do
 
 ```bash
 brew tap apotenza92/tap
-brew install --cask apotenza92/tap/dock-actioner
+brew install --cask apotenza92/tap/dockter
 ```
 
 Beta channel:
 
 ```bash
-brew install --cask apotenza92/tap/dock-actioner@beta
+brew install --cask apotenza92/tap/dockter@beta
 ```
 
-`dock-actioner@beta` installs side-by-side as `DockActioner Beta.app`.
+`dockter@beta` installs side-by-side as `Dockter Beta.app`.
 
 ### Manual
 
 1. Download the latest release zip from GitHub Releases.
-2. Move the app bundle to `/Applications` (`DockActioner.app` for stable, `DockActioner Beta.app` for beta).
+2. Move the app bundle to `/Applications` (`Dockter.app` for stable, `Dockter Beta.app` for beta).
 3. Launch once and grant required permissions.
 
 ## Permissions
 
-DockActioner requires:
+Dockter requires:
 
 1. **Accessibility** - for Dock hit-testing and app/window actions.
 2. **Input Monitoring** - for global click/scroll event taps.
@@ -55,7 +55,7 @@ Open **Preferences** from the menu bar icon.
 
 ## Updates
 
-- DockActioner uses Sparkle for native in-app updates.
+- Dockter uses Sparkle for native in-app updates.
 - Use **Check for Updates** in Settings for a manual check.
 - Configure automatic check frequency in **Settings > General**.
 - Sparkle release notes are generated from the matching entry in `CHANGELOG.md`.
@@ -88,10 +88,10 @@ Open **Preferences** from the menu bar icon.
 ## Build From Source
 
 ```bash
-xcodebuild -project DockActioner.xcodeproj -scheme DockActioner -configuration Debug build
+xcodebuild -project Dockter.xcodeproj -scheme Dockter -configuration Debug build
 ```
 
-You can also open `DockActioner.xcodeproj` in Xcode and run directly.
+You can also open `Dockter.xcodeproj` in Xcode and run directly.
 
 ## Release and Versioning
 
@@ -165,24 +165,24 @@ Where `SPARKLE_BIN` points to Sparkle tools inside your local Xcode DerivedData 
 
 Release workflow updates casks in `apotenza92/homebrew-tap`:
 
-- `Casks/dock-actioner.rb`
-- `Casks/dock-actioner@beta.rb`
+- `Casks/dockter.rb`
+- `Casks/dockter@beta.rb`
 
 Beta-channel rule matches your other projects: `@beta` tracks whichever is newer between latest stable and latest prerelease.
-Beta packages use `DockActioner-Beta-v<version>-macos-<arch>.zip` and install `DockActioner Beta.app`.
+Beta packages use `Dockter-Beta-v<version>-macos-<arch>.zip` and install `Dockter Beta.app`.
 
 ## Troubleshooting
 
 ### Gestures not firing
 
 - Confirm both permissions are granted.
-- Restart DockActioner from Preferences.
+- Restart Dockter from Preferences.
 - Reopen target app and retry.
 
 ### App Expose does not open
 
-- Ensure DockActioner has Accessibility and Input Monitoring permissions.
-- Retry after restarting DockActioner.
+- Ensure Dockter has Accessibility and Input Monitoring permissions.
+- Retry after restarting Dockter.
 
 ### Click sound/beep loops
 

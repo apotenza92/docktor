@@ -8,19 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let coordinator = DockExposeCoordinator.shared
     private let preferences = Preferences.shared
     private let updateManager = UpdateManager.shared
-    private let settingsWindowIdentifier = NSUserInterfaceItemIdentifier("DockActionerSettingsWindow")
+    private let settingsWindowIdentifier = NSUserInterfaceItemIdentifier("DockterSettingsWindow")
     private var fallbackPreferencesWindow: NSWindow?
-
-    private var isAutomatedMode: Bool {
-        let env = ProcessInfo.processInfo.environment
-        return env["DOCKACTIONER_AUTOTEST"] == "1"
-            || env["DOCKACTIONER_FUNCTIONAL_TEST"] == "1"
-            || env["DOCKACTIONER_TEST_SUITE"] == "1"
-            || env["DOCKACTIONER_APPEXPOSE_HOTKEY_TEST"] == "1"
-            || env["DOCKACTIONER_FIRSTCLICK_APPEXPOSE_TEST"] == "1"
-            || env["DOCKACTIONER_APPEXPOSE_REENTRY_TEST"] == "1"
-            || env["DOCKACTIONER_APPEXPOSE_CARTESIAN_TEST"] == "1"
-    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -30,88 +19,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         configureStatusItem()
         coordinator.startIfPossible()
-        updateManager.configureForLaunch(isAutomatedMode: isAutomatedMode)
-
-        if ProcessInfo.processInfo.environment["DOCKACTIONER_AUTOTEST"] == "1" {
-            Logger.log("Autotest enabled via DOCKACTIONER_AUTOTEST=1")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                self?.coordinator.runSelfTest()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.8) {
-                Logger.log("Autotest done; terminating")
-                NSApp.terminate(nil)
-            }
-        }
-
-        if ProcessInfo.processInfo.environment["DOCKACTIONER_FUNCTIONAL_TEST"] == "1" {
-            Logger.log("Functional test enabled via DOCKACTIONER_FUNCTIONAL_TEST=1")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                self?.coordinator.runFunctionalTest()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
-                Logger.log("Functional test done; terminating")
-                NSApp.terminate(nil)
-            }
-        }
-
-        if ProcessInfo.processInfo.environment["DOCKACTIONER_TEST_SUITE"] == "1" {
-            Logger.log("Full test suite enabled via DOCKACTIONER_TEST_SUITE=1")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-                self?.coordinator.runFullTestSuite()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 90.0) {
-                Logger.log("Full test suite timeout; terminating")
-                NSApp.terminate(nil)
-            }
-        }
-
-        if ProcessInfo.processInfo.environment["DOCKACTIONER_APPEXPOSE_HOTKEY_TEST"] == "1" {
-            Logger.log("App Expose hotkey test enabled via DOCKACTIONER_APPEXPOSE_HOTKEY_TEST=1")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.coordinator.testAppExposeHotkey()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-                Logger.log("App Expose hotkey test complete; terminating")
-                NSApp.terminate(nil)
-            }
-        }
-
-        if ProcessInfo.processInfo.environment["DOCKACTIONER_FIRSTCLICK_APPEXPOSE_TEST"] == "1" {
-            Logger.log("First-click App Expose test enabled via DOCKACTIONER_FIRSTCLICK_APPEXPOSE_TEST=1")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                self?.coordinator.runFirstClickAppExposeTestSuite()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 120.0) {
-                Logger.log("First-click App Expose test timeout; terminating")
-                NSApp.terminate(nil)
-            }
-        }
-
-        if ProcessInfo.processInfo.environment["DOCKACTIONER_APPEXPOSE_REENTRY_TEST"] == "1" {
-            Logger.log("App Expose re-entry test enabled via DOCKACTIONER_APPEXPOSE_REENTRY_TEST=1")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
-                self?.coordinator.runAppExposeReentryRegressionTest()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 150.0) {
-                Logger.log("App Expose re-entry test timeout; terminating")
-                NSApp.terminate(nil)
-            }
-        }
-
-        if ProcessInfo.processInfo.environment["DOCKACTIONER_APPEXPOSE_CARTESIAN_TEST"] == "1" {
-            Logger.log("App Expose cartesian test enabled via DOCKACTIONER_APPEXPOSE_CARTESIAN_TEST=1")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                self?.coordinator.runAppExposeCartesianTestSuite()
-            }
-            let timeout = max(300.0, Double(ProcessInfo.processInfo.environment["DOCKACTIONER_APPEXPOSE_CARTESIAN_TIMEOUT_SECONDS"] ?? "28800") ?? 28800.0)
-            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
-                Logger.log("App Expose cartesian test timeout; terminating")
-                NSApp.terminate(nil)
-            }
-        }
+        updateManager.configureForLaunch(isAutomatedMode: false)
         
         let isFirstLaunch = !preferences.firstLaunchCompleted
-        let shouldShowWindow = !isAutomatedMode && (isFirstLaunch || preferences.showOnStartup)
+        let shouldShowWindow = isFirstLaunch || preferences.showOnStartup
         DispatchQueue.main.async {
             if shouldShowWindow {
                 NSApp.activate(ignoringOtherApps: true)
@@ -148,7 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = StatusBarIcon.image()
         item.button?.image?.isTemplate = true
-        item.button?.setAccessibilityLabel("DockActioner")
+        item.button?.setAccessibilityLabel("Dockter")
         statusMenu.delegate = self
         item.menu = statusMenu
         rebuildStatusMenu()
@@ -170,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         statusMenu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: "Quit DockActioner",
+        let quitItem = NSMenuItem(title: "Quit Dockter",
                                   action: #selector(quit),
                                   keyEquivalent: "q")
         quitItem.target = self
@@ -247,13 +158,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return fallbackPreferencesWindow
         }
         return NSApp.windows.first(where: {
-            $0.identifier == settingsWindowIdentifier || $0.title == "DockActioner Settings" || $0.title == "Settings"
+            $0.identifier == settingsWindowIdentifier || $0.title == "Dockter Settings" || $0.title == "Settings"
         })
     }
 
     private func configurePreferencesWindow(_ window: NSWindow) {
         window.identifier = settingsWindowIdentifier
-        window.title = "DockActioner Settings"
+        window.title = "Dockter Settings"
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = false
         window.isMovableByWindowBackground = false

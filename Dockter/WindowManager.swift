@@ -281,13 +281,22 @@ enum WindowManager {
             Logger.log("WindowManager: App \(bundleIdentifier) is not running, cannot quit")
             return false
         }
-        let success = app.terminate()
-        if !success {
-            Logger.log("WindowManager: terminate() returned false for \(bundleIdentifier), attempting forceTerminate")
-            app.forceTerminate()
+
+        let terminateRequested = app.terminate()
+        if waitForTermination(app, timeout: 0.8) {
+            Logger.log("WindowManager: App \(bundleIdentifier) terminated gracefully")
+            return true
         }
-        Logger.log("WindowManager: Requested quit for \(bundleIdentifier)")
-        return true
+
+        Logger.log("WindowManager: terminate() did not finish for \(bundleIdentifier), requested=\(terminateRequested). Attempting forceTerminate.")
+        _ = app.forceTerminate()
+        if waitForTermination(app, timeout: 0.8) {
+            Logger.log("WindowManager: App \(bundleIdentifier) force-terminated")
+            return true
+        }
+
+        Logger.log("WindowManager: Failed to terminate \(bundleIdentifier)")
+        return false
     }
     
     /// Bring all windows of an app to the front (without minimizing/restore)
@@ -380,10 +389,31 @@ enum WindowManager {
     
     /// Check if any other app (excluding the provided bundle) is currently hidden.
     static func anyHiddenOthers(excluding bundleIdentifier: String) -> Bool {
-        NSWorkspace.shared.runningApplications.contains {
-            guard let id = $0.bundleIdentifier else { return false }
-            return id != bundleIdentifier && $0.isHidden
+        NSWorkspace.shared.runningApplications.contains { app in
+            guard let id = app.bundleIdentifier else { return false }
+            guard id != bundleIdentifier else { return false }
+            guard app.activationPolicy == .regular else { return false }
+            guard !app.isTerminated else { return false }
+            return app.isHidden
         }
+    }
+
+    private static func waitForTermination(_ app: NSRunningApplication,
+                                           timeout: TimeInterval,
+                                           pollInterval: TimeInterval = 0.05) -> Bool {
+        if app.isTerminated {
+            return true
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if app.isTerminated {
+                return true
+            }
+
+            _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(pollInterval))
+        }
+        return app.isTerminated
     }
     
 }

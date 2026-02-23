@@ -49,7 +49,7 @@ All notable changes to this project are documented in this file (stable and beta
 - Added full per-modifier action mapping with a table-style settings UI and new Single App Mode action.
 - Fixed Preferences opening from the status menu and simplified menu actions to Preferences + Quit.
 - Refined app and status-bar iconography, including a separate beta app icon set and larger menu bar glyph.
-- Added side-by-side beta distribution support (`DockActioner Beta.app`) across CI, release packaging, and Homebrew casks.
+- Added side-by-side beta distribution support (`Dockter Beta.app`) across CI, release packaging, and Homebrew casks.
 
 ## [v0.0.1]
 

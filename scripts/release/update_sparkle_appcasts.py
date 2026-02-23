@@ -147,7 +147,7 @@ def fetch_releases(repo: str, github_token: str | None) -> list[Release]:
     url = f"https://api.github.com/repos/{repo}/releases"
     headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": "dock-actioner-sparkle-appcast-sync",
+        "User-Agent": "dockter-sparkle-appcast-sync",
     }
     if github_token:
         headers["Authorization"] = f"Bearer {github_token}"
@@ -232,7 +232,7 @@ def download_asset(asset: ReleaseAsset, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     headers = {
         "Accept": "application/octet-stream",
-        "User-Agent": "dock-actioner-sparkle-signature-sync",
+        "User-Agent": "dockter-sparkle-signature-sync",
     }
     request = urllib.request.Request(asset.download_url, headers=headers)
 
@@ -278,8 +278,8 @@ def render_appcast(
     return f"""<?xml version=\"1.0\" encoding=\"utf-8\"?>
 <rss version=\"2.0\" xmlns:sparkle=\"http://www.andymatuschak.org/xml-namespaces/sparkle\">
   <channel>
-    <title>DockActioner {channel_name} Updates</title>
-    <description>DockActioner update feed ({channel_name.lower()} channel)</description>
+    <title>Dockter {channel_name} Updates</title>
+    <description>Dockter update feed ({channel_name.lower()} channel)</description>
     <language>en</language>
     <item>
       <title>Version {update_title}</title>
@@ -311,7 +311,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--repo",
-        default="apotenza92/dock-actioner",
+        default="apotenza92/dockter",
         help="GitHub repository owner/name",
     )
     parser.add_argument(
@@ -385,18 +385,18 @@ def main() -> int:
     beta_version = short_version(beta_track.parsed)
 
     stable_arm_asset = find_asset(
-        stable, f"DockActioner-v{stable_version}-macos-arm64.zip"
+        stable, f"Dockter-v{stable_version}-macos-arm64.zip"
     )
     stable_x64_asset = find_asset(
-        stable, f"DockActioner-v{stable_version}-macos-x64.zip"
+        stable, f"Dockter-v{stable_version}-macos-x64.zip"
     )
     beta_arm_asset = find_asset(
         beta_track,
-        f"DockActioner-Beta-v{beta_version}-macos-arm64.zip",
+        f"Dockter-Beta-v{beta_version}-macos-arm64.zip",
     )
     beta_x64_asset = find_asset(
         beta_track,
-        f"DockActioner-Beta-v{beta_version}-macos-x64.zip",
+        f"Dockter-Beta-v{beta_version}-macos-x64.zip",
     )
 
     stable_notes = extract_notes(args.changelog, stable.tag_name)

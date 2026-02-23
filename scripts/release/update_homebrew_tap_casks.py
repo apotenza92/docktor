@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""Update DockActioner Homebrew casks in apotenza92/homebrew-tap.
+"""Update Dockter Homebrew casks in apotenza92/homebrew-tap.
 
 Policy:
 - Stable cask tracks latest stable tag (vX.Y.Z).
 - Beta cask tracks whichever is newer between latest stable and latest prerelease.
   This keeps beta-channel users moving forward even when stable surpasses beta.
-- Beta artifacts install side-by-side as DockActioner Beta.app.
+- Beta artifacts install side-by-side as Dockter Beta.app.
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
+import hashlib
 import json
+import os
 import re
 import sys
 import urllib.error
@@ -37,7 +39,16 @@ class Release:
     tag_name: str
     draft: bool
     prerelease_flag: bool
+    assets: tuple["ReleaseAsset", ...]
     parsed: ParsedTag
+
+
+@dataclasses.dataclass(frozen=True)
+class ReleaseAsset:
+    name: str
+    download_url: str
+    size: int
+    sha256: str | None
 
 
 def parse_tag(tag: str) -> ParsedTag | None:
@@ -77,14 +88,34 @@ def version_key(
     return (parsed.major, parsed.minor, parsed.patch, is_stable, suffix)
 
 
-def fetch_releases(repo: str) -> list[Release]:
+def parse_sha256_digest(raw: object) -> str | None:
+    if raw is None:
+        return None
+    value = str(raw).strip().lower()
+    if value.startswith("sha256:"):
+        value = value.removeprefix("sha256:")
+    if re.fullmatch(r"[0-9a-f]{64}", value):
+        return value
+    return None
+
+
+def build_api_headers(user_agent: str, github_token: str | None) -> dict[str, str]:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": user_agent,
+    }
+    if github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
+    return headers
+
+
+def fetch_releases(repo: str, github_token: str | None) -> list[Release]:
     url = f"https://api.github.com/repos/{repo}/releases"
     req = urllib.request.Request(
         url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "dock-actioner-homebrew-sync",
-        },
+        headers=build_api_headers(
+            user_agent="dockter-homebrew-sync", github_token=github_token
+        ),
     )
 
     try:
@@ -99,11 +130,23 @@ def fetch_releases(repo: str) -> list[Release]:
         parsed = parse_tag(tag)
         if parsed is None:
             continue
+
+        assets = tuple(
+            ReleaseAsset(
+                name=str(asset.get("name", "")),
+                download_url=str(asset.get("browser_download_url", "")),
+                size=int(asset.get("size", 0)),
+                sha256=parse_sha256_digest(asset.get("digest")),
+            )
+            for asset in item.get("assets", [])
+        )
+
         output.append(
             Release(
                 tag_name=tag,
                 draft=bool(item.get("draft", False)),
                 prerelease_flag=bool(item.get("prerelease", False)),
+                assets=assets,
                 parsed=parsed,
             )
         )
@@ -124,20 +167,65 @@ def version_string(parsed: ParsedTag) -> str:
     return base
 
 
-def render_stable_cask(repo: str, version: str) -> str:
-    return f'''cask "dock-actioner" do
+def find_asset(release: Release, name: str) -> ReleaseAsset:
+    for asset in release.assets:
+        if asset.name == name:
+            return asset
+    raise RuntimeError(f"Asset '{name}' not found in release {release.tag_name}")
+
+
+def sha256_for_asset(
+    asset: ReleaseAsset, github_token: str | None, cache: dict[str, str]
+) -> str:
+    if asset.sha256 is not None:
+        return asset.sha256
+
+    if asset.download_url in cache:
+        return cache[asset.download_url]
+
+    print(f"Computing sha256 for asset {asset.name} ...")
+    request = urllib.request.Request(
+        asset.download_url,
+        headers=build_api_headers(
+            user_agent="dockter-homebrew-sha256", github_token=github_token
+        )
+        | {"Accept": "application/octet-stream"},
+    )
+    digest = hashlib.sha256()
+    with urllib.request.urlopen(request, timeout=120) as response:
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+
+    resolved = digest.hexdigest()
+    cache[asset.download_url] = resolved
+    return resolved
+
+
+def render_stable_cask(
+    repo: str,
+    version: str,
+    arm_url: str,
+    arm_sha256: str,
+    intel_url: str,
+    intel_sha256: str,
+) -> str:
+    return f'''cask "dockter" do
   version "{version}"
-  sha256 :no_check
 
   on_arm do
-    url "https://github.com/{repo}/releases/download/v#{{version}}/DockActioner-v#{{version}}-macos-arm64.zip"
+    url "{arm_url}"
+    sha256 "{arm_sha256}"
   end
 
   on_intel do
-    url "https://github.com/{repo}/releases/download/v#{{version}}/DockActioner-v#{{version}}-macos-x64.zip"
+    url "{intel_url}"
+    sha256 "{intel_sha256}"
   end
 
-  name "DockActioner"
+  name "Dockter"
   desc "Dock gesture actions for macOS"
   homepage "https://github.com/{repo}"
 
@@ -146,33 +234,41 @@ def render_stable_cask(repo: str, version: str) -> str:
     strategy :github_latest
   end
 
-  app "DockActioner.app"
+  app "Dockter.app"
 
   zap trash: [
-    "~/Library/Application Support/DockActioner",
-    "~/Library/Caches/pzc.DockActioner",
-    "~/Library/Preferences/pzc.DockActioner.plist",
-    "~/Library/Saved Application State/pzc.DockActioner.savedState",
+    "~/Library/Application Support/Dockter",
+    "~/Library/Caches/pzc.Dockter",
+    "~/Library/Preferences/pzc.Dockter.plist",
+    "~/Library/Saved Application State/pzc.Dockter.savedState",
   ]
 end
 '''
 
 
-def render_beta_cask(repo: str, version: str) -> str:
-    return f'''cask "dock-actioner@beta" do
+def render_beta_cask(
+    repo: str,
+    version: str,
+    arm_url: str,
+    arm_sha256: str,
+    intel_url: str,
+    intel_sha256: str,
+) -> str:
+    return f'''cask "dockter@beta" do
   version "{version}"
-  sha256 :no_check
 
   on_arm do
-    url "https://github.com/{repo}/releases/download/v#{{version}}/DockActioner-Beta-v#{{version}}-macos-arm64.zip"
+    url "{arm_url}"
+    sha256 "{arm_sha256}"
   end
 
   on_intel do
-    url "https://github.com/{repo}/releases/download/v#{{version}}/DockActioner-Beta-v#{{version}}-macos-x64.zip"
+    url "{intel_url}"
+    sha256 "{intel_sha256}"
   end
 
-  name "DockActioner Beta"
-  desc "Beta channel for DockActioner"
+  name "Dockter Beta"
+  desc "Beta channel for Dockter"
   homepage "https://github.com/{repo}"
 
   livecheck do
@@ -184,13 +280,13 @@ def render_beta_cask(repo: str, version: str) -> str:
     end
   end
 
-  app "DockActioner Beta.app"
+  app "Dockter Beta.app"
 
   zap trash: [
-    "~/Library/Application Support/DockActioner Beta",
-    "~/Library/Caches/pzc.DockActioner.beta",
-    "~/Library/Preferences/pzc.DockActioner.beta.plist",
-    "~/Library/Saved Application State/pzc.DockActioner.beta.savedState",
+    "~/Library/Application Support/Dockter Beta",
+    "~/Library/Caches/pzc.Dockter.beta",
+    "~/Library/Preferences/pzc.Dockter.beta.plist",
+    "~/Library/Saved Application State/pzc.Dockter.beta.savedState",
   ]
 end
 '''
@@ -214,12 +310,17 @@ def main() -> int:
     )
     parser.add_argument(
         "--repo",
-        default="apotenza92/dock-actioner",
+        default="apotenza92/dockter",
         help="GitHub repository owner/name",
+    )
+    parser.add_argument(
+        "--github-token",
+        default=os.environ.get("GITHUB_TOKEN", "").strip() or None,
+        help="GitHub token for API and asset download requests (defaults to GITHUB_TOKEN env var)",
     )
     args = parser.parse_args()
 
-    releases = fetch_releases(args.repo)
+    releases = fetch_releases(args.repo, github_token=args.github_token)
     stable = pick_latest(
         [release for release in releases if release.parsed.prerelease is None]
     )
@@ -243,13 +344,31 @@ def main() -> int:
 
     casks_dir = args.tap_path / "Casks"
     casks_dir.mkdir(parents=True, exist_ok=True)
+    sha_cache: dict[str, str] = {}
 
     stable_changed = False
     if stable is not None:
         stable_version = version_string(stable.parsed)
+        stable_arm_name = f"Dockter-v{stable_version}-macos-arm64.zip"
+        stable_intel_name = f"Dockter-v{stable_version}-macos-x64.zip"
+        stable_arm_asset = find_asset(stable, stable_arm_name)
+        stable_intel_asset = find_asset(stable, stable_intel_name)
+        stable_arm_sha = sha256_for_asset(
+            stable_arm_asset, github_token=args.github_token, cache=sha_cache
+        )
+        stable_intel_sha = sha256_for_asset(
+            stable_intel_asset, github_token=args.github_token, cache=sha_cache
+        )
         stable_changed = write_if_changed(
-            casks_dir / "dock-actioner.rb",
-            render_stable_cask(args.repo, stable_version),
+            casks_dir / "dockter.rb",
+            render_stable_cask(
+                args.repo,
+                stable_version,
+                stable_arm_asset.download_url,
+                stable_arm_sha,
+                stable_intel_asset.download_url,
+                stable_intel_sha,
+            ),
         )
         print(
             f"Stable cask -> {stable_version} ({'updated' if stable_changed else 'unchanged'})"
@@ -258,8 +377,26 @@ def main() -> int:
         print("Stable cask unchanged (no stable releases yet)")
 
     beta_version = version_string(beta_track.parsed)
+    beta_arm_name = f"Dockter-Beta-v{beta_version}-macos-arm64.zip"
+    beta_intel_name = f"Dockter-Beta-v{beta_version}-macos-x64.zip"
+    beta_arm_asset = find_asset(beta_track, beta_arm_name)
+    beta_intel_asset = find_asset(beta_track, beta_intel_name)
+    beta_arm_sha = sha256_for_asset(
+        beta_arm_asset, github_token=args.github_token, cache=sha_cache
+    )
+    beta_intel_sha = sha256_for_asset(
+        beta_intel_asset, github_token=args.github_token, cache=sha_cache
+    )
     beta_changed = write_if_changed(
-        casks_dir / "dock-actioner@beta.rb", render_beta_cask(args.repo, beta_version)
+        casks_dir / "dockter@beta.rb",
+        render_beta_cask(
+            args.repo,
+            beta_version,
+            beta_arm_asset.download_url,
+            beta_arm_sha,
+            beta_intel_asset.download_url,
+            beta_intel_sha,
+        ),
     )
     print(f"Beta cask -> {beta_version} ({'updated' if beta_changed else 'unchanged'})")
 

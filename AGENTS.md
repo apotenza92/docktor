@@ -1,4 +1,4 @@
-# DockActioner
+# Dockter
 
 Native macOS utility that augments Dock icon interactions with click and scroll actions.
 
@@ -6,13 +6,13 @@ Native macOS utility that augments Dock icon interactions with click and scroll 
 
 - Swift 5 / SwiftUI
 - AppKit + CoreGraphics event taps
-- Xcode project (`DockActioner.xcodeproj`)
+- Xcode project (`Dockter.xcodeproj`)
 
 ## Common Commands
 
 ```bash
-xcodebuild -project DockActioner.xcodeproj -scheme DockActioner -configuration Debug build
-DOCKACTIONER_TEST_SUITE=1 ".build/Build/Products/Debug/DockActioner.app/Contents/MacOS/DockActioner"
+xcodebuild -project Dockter.xcodeproj -scheme Dockter -configuration Debug build
+DOCKTER_TEST_SUITE=1 ".build/Build/Products/Debug/Dockter.app/Contents/MacOS/Dockter"
 swift tools/generate_icons.swift
 ./scripts/release.sh 0.0.1
 ```
@@ -23,7 +23,7 @@ swift tools/generate_icons.swift
 - Tag formats:
   - Stable: `vX.Y.Z`
   - Beta: `vX.Y.Z-beta.N`
-- `DockActioner.xcodeproj` `MARKETING_VERSION` must match tag core version (`X.Y.Z`).
+- `Dockter.xcodeproj` `MARKETING_VERSION` must match tag core version (`X.Y.Z`).
 - `CHANGELOG.md` must contain a matching heading: `## [vX.Y.Z]` or `## [vX.Y.Z-beta.N]`.
 
 ## CI and Distribution
@@ -31,8 +31,8 @@ swift tools/generate_icons.swift
 - `ci.yml`: push/PR verification (build only).
 - `release.yml`: signed + notarized macOS artifacts, GitHub Release publishing, Homebrew tap sync.
 - Homebrew casks are updated in `apotenza92/homebrew-tap`:
-  - `dock-actioner`
-  - `dock-actioner@beta`
+  - `dockter`
+  - `dockter@beta`
 - Beta cask tracks whichever is newer between stable and prerelease channels.
 
 ## Secrets Expected In GitHub

@@ -117,7 +117,7 @@ func writePNG(_ image: NSImage, to url: URL) throws {
           let rep = NSBitmapImageRep(data: tiff),
           let data = rep.representation(using: .png, properties: [:]) else {
         throw NSError(
-            domain: "DockActionerStatusBarPreview",
+            domain: "DockterStatusBarPreview",
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "Failed to encode PNG"]
         )
