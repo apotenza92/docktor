@@ -6,6 +6,10 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.0.14]
+
+- Fixed menu-bar `Preferences…` opening reliability by using a resilient multi-path action handler (`showSettingsWindow:` -> `showPreferencesWindow:` -> in-app fallback window).
+
 ## [v0.0.13]
 
 - Fixed status-bar `Preferences…` action routing to use the standard Settings responder path, preventing crashes when opening settings from the menu bar icon.

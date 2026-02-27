@@ -101,9 +101,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusMenu.removeAllItems()
 
         let preferencesItem = NSMenuItem(title: "Preferences…",
-                                         action: Selector(("showSettingsWindow:")),
+                                         action: #selector(showPreferencesFromStatusItem(_:)),
                                          keyEquivalent: ",")
-        preferencesItem.target = nil
+        preferencesItem.target = self
         statusMenu.addItem(preferencesItem)
 
         statusMenu.addItem(.separator())
@@ -115,6 +115,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusMenu.addItem(quitItem)
     }
     
+    @objc private func showPreferencesFromStatusItem(_ sender: Any?) {
+        let openedViaSettings = NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: sender)
+        if openedViaSettings {
+            Logger.log("Status menu preferences opened via showSettingsWindow:")
+            return
+        }
+
+        let openedViaPreferences = NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: sender)
+        if openedViaPreferences {
+            Logger.log("Status menu preferences opened via showPreferencesWindow:")
+            return
+        }
+
+        Logger.log("Status menu preferences falling back to custom window presentation")
+        showPreferencesWindow()
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
     }
