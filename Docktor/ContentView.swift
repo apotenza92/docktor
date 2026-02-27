@@ -4,7 +4,7 @@ import AppKit
 struct PreferencesView: View {
     @ObservedObject var coordinator: DockExposeCoordinator
     @ObservedObject var updateManager: UpdateManager
-    @ObservedObject var preferences = Preferences.shared
+    @ObservedObject var preferences: Preferences
     @State private var showingPermissionsInfo = false
 
     private enum MappingSource {
@@ -65,8 +65,15 @@ struct PreferencesView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("General")
                 .font(sectionTitleFont)
+            checkboxRow("Show menu bar icon", isOn: $preferences.showMenuBarIcon)
             checkboxRow("Show settings on startup", isOn: $preferences.showOnStartup)
             checkboxRow("Start Docktor at login", isOn: $preferences.startAtLogin)
+            if !preferences.showMenuBarIcon {
+                Text("Tip: \"Show settings on startup\" is kept enabled while the menu bar icon is hidden.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack(spacing: 12) {
                 Button("Check for Updates", action: updateManager.checkForUpdates)
                     .buttonStyle(.borderedProminent)

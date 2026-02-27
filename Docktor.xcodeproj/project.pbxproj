@@ -7,10 +7,28 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		3753B064E9EE87BADBB34AAC /* Docktor.app in Frameworks */ = {isa = PBXBuildFile; fileRef = FA12B1922EFF98EC00DB8333 /* Docktor.app */; };
+		C374E4A29F47ED49B09150A8 /* DockDecisionEngineXCTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93451BA79642D3FDADF60039 /* DockDecisionEngineXCTest.swift */; };
+		D1E2F3A4B5C60718293A4B5C /* DockDecisionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E2D3C4B5A6978877665544 /* DockDecisionEngine.swift */; };
+		EDD76B1AD00EEC6FF14F9306 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E1C3D7B1DBCB2A02A51BAF57 /* Cocoa.framework */; };
 		FA12B1D52F00111100DB8333 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = FA12B1D72F00111100DB8333 /* Sparkle */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		8C6292CD62A4DE979BFEEF48 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FA12B18A2EFF98EC00DB8333 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FA12B1912EFF98EC00DB8333;
+			remoteInfo = Docktor;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		1D80AE08BC0FDB992139A0CF /* DocktorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DocktorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		93451BA79642D3FDADF60039 /* DockDecisionEngineXCTest.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DocktorTests/DockDecisionEngineXCTest.swift; sourceTree = "<group>"; };
+		F1E2D3C4B5A6978877665544 /* DockDecisionEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Docktor/DockDecisionEngine.swift; sourceTree = "<group>"; };
+		E1C3D7B1DBCB2A02A51BAF57 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		FA12B1922EFF98EC00DB8333 /* Docktor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Docktor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -44,14 +62,42 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FDDBF35460DD9F452C48CE6F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EDD76B1AD00EEC6FF14F9306 /* Cocoa.framework in Frameworks */,
+				3753B064E9EE87BADBB34AAC /* Docktor.app in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		408FA64AE679444C7627B0C1 /* DocktorTests */ = {
+			isa = PBXGroup;
+			children = (
+				93451BA79642D3FDADF60039 /* DockDecisionEngineXCTest.swift */,
+				F1E2D3C4B5A6978877665544 /* DockDecisionEngine.swift */,
+			);
+			name = DocktorTests;
+			sourceTree = "<group>";
+		};
+		7BDB2415F3A68D537EAAD0E5 /* OS X */ = {
+			isa = PBXGroup;
+			children = (
+				E1C3D7B1DBCB2A02A51BAF57 /* Cocoa.framework */,
+			);
+			name = "OS X";
+			sourceTree = "<group>";
+		};
 		FA12B1892EFF98EC00DB8333 = {
 			isa = PBXGroup;
 			children = (
 				FA12B1942EFF98EC00DB8333 /* Docktor */,
 				FA12B1932EFF98EC00DB8333 /* Products */,
+				FF5D67367B0D161DB7F4E96C /* Frameworks */,
+				408FA64AE679444C7627B0C1 /* DocktorTests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -59,13 +105,40 @@
 			isa = PBXGroup;
 			children = (
 				FA12B1922EFF98EC00DB8333 /* Docktor.app */,
+				1D80AE08BC0FDB992139A0CF /* DocktorTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		FF5D67367B0D161DB7F4E96C /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				7BDB2415F3A68D537EAAD0E5 /* OS X */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		97E7EA4EF02432669DF416E4 /* DocktorTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 69BC6F637EEB27F153567E0C /* Build configuration list for PBXNativeTarget "DocktorTests" */;
+			buildPhases = (
+				30F8AE66953AA5D313645424 /* Sources */,
+				FDDBF35460DD9F452C48CE6F /* Frameworks */,
+				EABF5FC39E4DBAF88FEA907E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				BE10FB24273B1080E291370B /* PBXTargetDependency */,
+			);
+			name = DocktorTests;
+			productName = DocktorTests;
+			productReference = 1D80AE08BC0FDB992139A0CF /* DocktorTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		FA12B1912EFF98EC00DB8333 /* Docktor */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = FA12B19D2EFF98ED00DB8333 /* Build configuration list for PBXNativeTarget "Docktor" */;
@@ -122,11 +195,19 @@
 			projectRoot = "";
 			targets = (
 				FA12B1912EFF98EC00DB8333 /* Docktor */,
+				97E7EA4EF02432669DF416E4 /* DocktorTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		EABF5FC39E4DBAF88FEA907E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		FA12B1902EFF98EC00DB8333 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -137,6 +218,15 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		30F8AE66953AA5D313645424 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C374E4A29F47ED49B09150A8 /* DockDecisionEngineXCTest.swift in Sources */,
+				D1E2F3A4B5C60718293A4B5C /* DockDecisionEngine.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		FA12B18E2EFF98EC00DB8333 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -146,7 +236,48 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		BE10FB24273B1080E291370B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = Docktor;
+			target = FA12B1912EFF98EC00DB8333 /* Docktor */;
+			targetProxy = 8C6292CD62A4DE979BFEEF48 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		98961A0CE3E02B650968D175 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = pzc.DockterTests;
+				PRODUCT_MODULE_NAME = DocktorTests;
+				PRODUCT_NAME = DocktorTests;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "";
+			};
+			name = Release;
+		};
+		E70359510681E948BAB5A238 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = pzc.DockterTests;
+				PRODUCT_MODULE_NAME = DocktorTests;
+				PRODUCT_NAME = DocktorTests;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "";
+			};
+			name = Debug;
+		};
 		FA12B19B2EFF98ED00DB8333 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -285,7 +416,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 0.0.14;
+				MARKETING_VERSION = 0.0.15;
 				PRODUCT_BUNDLE_IDENTIFIER = pzc.Dockter;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -319,7 +450,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 0.0.14;
+				MARKETING_VERSION = 0.0.15;
 				PRODUCT_BUNDLE_IDENTIFIER = pzc.Dockter;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -335,6 +466,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		69BC6F637EEB27F153567E0C /* Build configuration list for PBXNativeTarget "DocktorTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				98961A0CE3E02B650968D175 /* Release */,
+				E70359510681E948BAB5A238 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		FA12B18D2EFF98EC00DB8333 /* Build configuration list for PBXProject "Docktor" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

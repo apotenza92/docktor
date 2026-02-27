@@ -11,12 +11,40 @@ import AppKit
 @main
 struct DocktorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    private let updateManager = UpdateManager.shared
+
+    private let services: AppServices
+    @ObservedObject private var preferences: Preferences
+
+    init() {
+        let services = AppServices.live
+        self.services = services
+        self._preferences = ObservedObject(wrappedValue: services.preferences)
+        AppDelegate.services = services
+    }
 
     var body: some Scene {
+        MenuBarExtra(isInserted: $preferences.showMenuBarIcon) {
+            Button("Settings…") {
+                appDelegate.showSettingsWindow()
+            }
+            .keyboardShortcut(",")
+
+            Divider()
+
+            Button("Quit Docktor") {
+                NSApp.terminate(nil)
+            }
+            .keyboardShortcut("q")
+        } label: {
+            Image(nsImage: StatusBarIcon.image())
+                .renderingMode(.template)
+                .accessibilityLabel("Docktor")
+        }
+
         Settings {
-            PreferencesView(coordinator: DockExposeCoordinator.shared,
-                            updateManager: updateManager)
+            PreferencesView(coordinator: services.coordinator,
+                            updateManager: services.updateManager,
+                            preferences: services.preferences)
         }
     }
 }

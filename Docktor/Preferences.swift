@@ -95,6 +95,7 @@ final class Preferences: ObservableObject {
     static let shared = Preferences()
 
     private let userDefaults = UserDefaults.standard
+    private let settingsStore: SettingsStore
     private let clickActionKey = "clickAction"
     private let shiftClickActionKey = "shiftClickAction"
     private let optionClickActionKey = "optionClickAction"
@@ -111,6 +112,7 @@ final class Preferences: ObservableObject {
     private let behaviorDefaultsMigratedKey = "behaviorDefaultsMigrated_v4"
     private let modifierDefaultsMigratedKey = "modifierDefaultsMigrated_v5"
     private let showOnStartupKey = "showOnStartup"
+    private let showMenuBarIconKey = "showMenuBarIcon"
     private let firstLaunchCompletedKey = "firstLaunchCompleted"
     private let startAtLoginKey = "startAtLogin"
     private let updateCheckFrequencyKey = "updateCheckFrequency"
@@ -123,6 +125,13 @@ final class Preferences: ObservableObject {
     private let clickAppExposeRequiresMultipleWindowsKey = "clickAppExposeRequiresMultipleWindows"
     private let firstClickModifierActionsMigratedKey = "firstClickModifierActionsMigrated_v6"
 
+    private static let showOnStartupPreferenceKey = PreferenceKey<Bool>(name: "showOnStartup", defaultValue: false)
+    private static let showMenuBarIconPreferenceKey = PreferenceKey<Bool>(name: "showMenuBarIcon", defaultValue: true)
+    private static let firstLaunchCompletedPreferenceKey = PreferenceKey<Bool>(name: "firstLaunchCompleted", defaultValue: false)
+    private static let updateCheckFrequencyPreferenceKey = PreferenceKey<UpdateCheckFrequency>(name: "updateCheckFrequency", defaultValue: .daily)
+    private static let firstClickBehaviorPreferenceKey = PreferenceKey<FirstClickBehavior>(name: "firstClickBehavior", defaultValue: .appExpose)
+    private static let lastUpdateCheckTimestampPreferenceKey = PreferenceKey<Double>(name: "lastUpdateCheckTimestamp", defaultValue: 0)
+
     // Prevent feedback loop when we adjust login item after a failed toggle.
     private var applyingLoginItemChange = false
 
@@ -134,7 +143,7 @@ final class Preferences: ObservableObject {
 
     @Published var firstClickBehavior: FirstClickBehavior {
         didSet {
-            userDefaults.set(firstClickBehavior.rawValue, forKey: firstClickBehaviorKey)
+            settingsStore.set(firstClickBehavior, for: Self.firstClickBehaviorPreferenceKey)
         }
     }
 
@@ -236,13 +245,23 @@ final class Preferences: ObservableObject {
 
     @Published var showOnStartup: Bool {
         didSet {
-            userDefaults.set(showOnStartup, forKey: showOnStartupKey)
+            settingsStore.set(showOnStartup, for: Self.showOnStartupPreferenceKey)
+        }
+    }
+
+    @Published var showMenuBarIcon: Bool {
+        didSet {
+            settingsStore.set(showMenuBarIcon, for: Self.showMenuBarIconPreferenceKey)
+            if !showMenuBarIcon && !showOnStartup {
+                showOnStartup = true
+                Logger.log("Preferences: Enabled showOnStartup because menu bar icon was hidden")
+            }
         }
     }
 
     @Published var firstLaunchCompleted: Bool {
         didSet {
-            userDefaults.set(firstLaunchCompleted, forKey: firstLaunchCompletedKey)
+            settingsStore.set(firstLaunchCompleted, for: Self.firstLaunchCompletedPreferenceKey)
         }
     }
 
@@ -270,11 +289,13 @@ final class Preferences: ObservableObject {
 
     @Published var updateCheckFrequency: UpdateCheckFrequency {
         didSet {
-            userDefaults.set(updateCheckFrequency.rawValue, forKey: updateCheckFrequencyKey)
+            settingsStore.set(updateCheckFrequency, for: Self.updateCheckFrequencyPreferenceKey)
         }
     }
 
     private init() {
+        self.settingsStore = SettingsStore(defaults: UserDefaults.standard)
+
         // Load base mappings from UserDefaults or use defaults.
         var clickAction: DockAction
         if let clickRaw = userDefaults.string(forKey: clickActionKey),
@@ -425,8 +446,9 @@ final class Preferences: ObservableObject {
         Self.seedIfMissing(shiftOptionScrollDownAction, in: userDefaults, forKey: shiftOptionScrollDownActionKey)
 
         // General settings defaults
-        let showOnStartup = userDefaults.object(forKey: showOnStartupKey) as? Bool ?? false
-        let firstLaunchCompleted = userDefaults.object(forKey: firstLaunchCompletedKey) as? Bool ?? false
+        let showOnStartup = settingsStore.value(for: Self.showOnStartupPreferenceKey)
+        let showMenuBarIcon = settingsStore.value(for: Self.showMenuBarIconPreferenceKey)
+        let firstLaunchCompleted = settingsStore.value(for: Self.firstLaunchCompletedPreferenceKey)
 
         // Login item: prefer system status; fall back to stored preference
         let loginItemEnabled = SMAppService.mainApp.status == .enabled
@@ -437,21 +459,9 @@ final class Preferences: ObservableObject {
             startAtLogin = userDefaults.object(forKey: startAtLoginKey) as? Bool ?? false
         }
 
-        let updateCheckFrequency: UpdateCheckFrequency
-        if let rawFrequency = userDefaults.string(forKey: updateCheckFrequencyKey),
-           let frequency = UpdateCheckFrequency(rawValue: rawFrequency) {
-            updateCheckFrequency = frequency
-        } else {
-            updateCheckFrequency = .daily
-        }
+        let updateCheckFrequency = settingsStore.value(for: Self.updateCheckFrequencyPreferenceKey)
 
-        let firstClickBehavior: FirstClickBehavior
-        if let rawFirstClickBehavior = userDefaults.string(forKey: firstClickBehaviorKey),
-           let behavior = FirstClickBehavior(rawValue: rawFirstClickBehavior) {
-            firstClickBehavior = behavior
-        } else {
-            firstClickBehavior = .appExpose
-        }
+        let firstClickBehavior = settingsStore.value(for: Self.firstClickBehaviorPreferenceKey)
 
         let firstClickAppExposeRequiresMultipleWindows = userDefaults.object(forKey: firstClickAppExposeRequiresMultipleWindowsKey) as? Bool ?? true
         let clickAppExposeRequiresMultipleWindows = userDefaults.object(forKey: clickAppExposeRequiresMultipleWindowsKey) as? Bool ?? true
@@ -476,6 +486,7 @@ final class Preferences: ObservableObject {
         self.optionScrollDownAction = optionScrollDownAction
         self.shiftOptionScrollDownAction = shiftOptionScrollDownAction
         self.showOnStartup = showOnStartup
+        self.showMenuBarIcon = showMenuBarIcon
         self.firstLaunchCompleted = firstLaunchCompleted
         self.startAtLogin = startAtLogin
         self.updateCheckFrequency = updateCheckFrequency
@@ -517,7 +528,7 @@ final class Preferences: ObservableObject {
     }
 
     func markUpdateCheckNow(_ date: Date = Date()) {
-        userDefaults.set(date.timeIntervalSince1970, forKey: lastUpdateCheckTimestampKey)
+        settingsStore.set(date.timeIntervalSince1970, for: Self.lastUpdateCheckTimestampPreferenceKey)
     }
 
     func shouldCheckForUpdatesOnLaunch(now: Date = Date()) -> Bool {
@@ -534,7 +545,7 @@ final class Preferences: ObservableObject {
     }
 
     private func lastUpdateCheckDate() -> Date? {
-        let timestamp = userDefaults.double(forKey: lastUpdateCheckTimestampKey)
+        let timestamp = settingsStore.value(for: Self.lastUpdateCheckTimestampPreferenceKey)
         guard timestamp > 0 else { return nil }
         return Date(timeIntervalSince1970: timestamp)
     }

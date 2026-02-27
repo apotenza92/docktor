@@ -6,6 +6,14 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.0.15]
+
+- Reworked the menu-bar shell to SwiftUI `MenuBarExtra` and standardized wording to `Settings…`.
+- Added menu icon visibility toggle with lockout protection (`showOnStartup` auto-enable when icon is hidden).
+- Added settings fail-safes: launch arguments (`--settings`/aliases) and URL handlers (`docktor://settings`, `dockter://settings`).
+- Hardened Dock click/App Exposé decision flow and hide behavior reliability for issue #1 regressions.
+- Added `DockDecisionEngine` extraction, XCTest target/scheme support, and expanded automated regression scripts.
+
 ## [v0.0.14]
 
 - Fixed menu-bar `Preferences…` opening reliability by using a resilient multi-path action handler (`showSettingsWindow:` -> `showPreferencesWindow:` -> in-app fallback window).

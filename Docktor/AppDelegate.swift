@@ -2,16 +2,17 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private var statusItem: NSStatusItem?
-    private let statusMenu = NSMenu()
-    private let coordinator = DockExposeCoordinator.shared
-    private let preferences = Preferences.shared
-    private let updateManager = UpdateManager.shared
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    static var services: AppServices = .live
+
+    private var coordinator: DockExposeCoordinator { Self.services.coordinator }
+    private var preferences: Preferences { Self.services.preferences }
+    private var updateManager: UpdateManager { Self.services.updateManager }
     private let settingsWindowIdentifier = NSUserInterfaceItemIdentifier("DocktorSettingsWindow")
-    private var fallbackPreferencesWindow: NSWindow?
+    private var fallbackSettingsWindow: NSWindow?
     private let legacyAppBundleNames = ["DockActioner.app", "Dockter.app"]
     private let currentAppBundleName = "Docktor.app"
+    private let openSettingsLaunchArguments: Set<String> = ["--settings", "-settings", "--open-settings"]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -20,18 +21,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         terminateOtherInstances()
 
-        configureStatusItem()
         coordinator.startIfPossible()
         updateManager.configureForLaunch(isAutomatedMode: false)
-        
+
         let isFirstLaunch = !preferences.firstLaunchCompleted
-        let shouldShowWindow = isFirstLaunch || preferences.showOnStartup
+        let launchRequestsSettings = ProcessInfo.processInfo.arguments.contains { openSettingsLaunchArguments.contains($0) }
+        let shouldShowWindow = launchRequestsSettings || isFirstLaunch || preferences.showOnStartup
+        if launchRequestsSettings {
+            Logger.log("Launch argument requested settings window")
+        }
+
         DispatchQueue.main.async {
             if shouldShowWindow {
-                NSApp.activate(ignoringOtherApps: true)
-                self.showPreferencesWindow()
+                self.showSettingsWindow()
             } else {
-                self.hidePreferencesWindow()
+                self.hideSettingsWindow()
             }
             self.handlePermissionsIfNeeded(allowPrompt: shouldShowWindow)
             if isFirstLaunch {
@@ -81,61 +85,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         coordinator.stop()
     }
 
-    private func configureStatusItem() {
-        Logger.log("Configuring status item.")
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = StatusBarIcon.image()
-        item.button?.image?.isTemplate = true
-        item.button?.setAccessibilityLabel("Docktor")
-        statusMenu.delegate = self
-        item.menu = statusMenu
-        rebuildStatusMenu()
-        statusItem = item
-    }
-
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        rebuildStatusMenu()
-    }
-
-    private func rebuildStatusMenu() {
-        statusMenu.removeAllItems()
-
-        let preferencesItem = NSMenuItem(title: "Preferences…",
-                                         action: #selector(showPreferencesFromStatusItem(_:)),
-                                         keyEquivalent: ",")
-        preferencesItem.target = self
-        statusMenu.addItem(preferencesItem)
-
-        statusMenu.addItem(.separator())
-
-        let quitItem = NSMenuItem(title: "Quit Docktor",
-                                  action: #selector(quit),
-                                  keyEquivalent: "q")
-        quitItem.target = self
-        statusMenu.addItem(quitItem)
-    }
-    
-    @objc private func showPreferencesFromStatusItem(_ sender: Any?) {
-        let openedViaSettings = NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: sender)
-        if openedViaSettings {
-            Logger.log("Status menu preferences opened via showSettingsWindow:")
-            return
-        }
-
-        let openedViaPreferences = NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: sender)
-        if openedViaPreferences {
-            Logger.log("Status menu preferences opened via showPreferencesWindow:")
-            return
-        }
-
-        Logger.log("Status menu preferences falling back to custom window presentation")
-        showPreferencesWindow()
-    }
-
-    @objc private func quit() {
-        NSApp.terminate(nil)
-    }
-
     private func handlePermissionsIfNeeded(allowPrompt: Bool) {
         let needsAccessibility = !coordinator.hasAccessibilityPermission
         let needsInputMonitoring = !coordinator.inputMonitoringGranted
@@ -151,56 +100,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard let self else { return }
                 self.coordinator.requestInputMonitoringPermission()
                 self.coordinator.startWhenPermissionAvailable()
-                self.rebuildStatusMenu()
             }
         } else {
             coordinator.startWhenPermissionAvailable()
-            rebuildStatusMenu()
+        }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            handleIncomingURL(url)
+        }
+    }
+
+    private func handleIncomingURL(_ url: URL) {
+        guard let scheme = url.scheme?.lowercased(), scheme == "docktor" || scheme == "dockter" else {
+            return
+        }
+
+        let host = url.host?.lowercased() ?? ""
+        let path = url.path.lowercased()
+        if host == "settings" || host == "preferences" || path == "/settings" || path == "/preferences" {
+            Logger.log("Received URL request to open settings: \(url.absoluteString)")
+            showSettingsWindow()
         }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        showPreferencesWindow()
+        showSettingsWindow()
         return true
     }
 
-    private func showPreferencesWindow() {
+    func showSettingsWindow() {
+        Logger.log("Opening settings window")
         NSApp.activate(ignoringOtherApps: true)
 
-        if let window = currentPreferencesWindow {
-            configurePreferencesWindow(window)
+        if let window = currentSettingsWindow {
+            configureSettingsWindow(window)
             window.makeKeyAndOrderFront(nil)
             return
         }
 
-        showFallbackPreferencesWindow()
-    }
-    
-    private func hidePreferencesWindow() {
-        currentPreferencesWindow?.orderOut(nil)
-        fallbackPreferencesWindow?.orderOut(nil)
+        showFallbackSettingsWindow()
     }
 
-    private var currentPreferencesWindow: NSWindow? {
-        if let fallbackPreferencesWindow {
-            return fallbackPreferencesWindow
+    private func hideSettingsWindow() {
+        currentSettingsWindow?.orderOut(nil)
+        fallbackSettingsWindow?.orderOut(nil)
+    }
+
+    private var currentSettingsWindow: NSWindow? {
+        if let fallbackSettingsWindow {
+            return fallbackSettingsWindow
         }
+
         return NSApp.windows.first(where: {
             $0.identifier == settingsWindowIdentifier || $0.title == "Docktor Settings" || $0.title == "Settings"
         })
     }
 
-    private func configurePreferencesWindow(_ window: NSWindow) {
+    private func configureSettingsWindow(_ window: NSWindow) {
         window.identifier = settingsWindowIdentifier
         window.title = "Docktor Settings"
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = false
         window.isMovableByWindowBackground = false
-        sizePreferencesWindowToContent(window)
+        sizeSettingsWindowToContent(window)
         window.center()
     }
 
-    private func sizePreferencesWindowToContent(_ window: NSWindow) {
+    private func sizeSettingsWindowToContent(_ window: NSWindow) {
         guard let contentView = window.contentView else { return }
         contentView.layoutSubtreeIfNeeded()
         let fittingSize = contentView.fittingSize
@@ -208,15 +176,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         window.setContentSize(fittingSize)
     }
 
-    private func showFallbackPreferencesWindow() {
-        if let window = fallbackPreferencesWindow {
-            configurePreferencesWindow(window)
+    private func showFallbackSettingsWindow() {
+        if let window = fallbackSettingsWindow {
+            configureSettingsWindow(window)
             window.makeKeyAndOrderFront(nil)
             return
         }
 
-        let rootView = PreferencesView(coordinator: DockExposeCoordinator.shared,
-                                       updateManager: UpdateManager.shared)
+        Logger.log("Creating fallback settings window")
+
+        let rootView = PreferencesView(coordinator: coordinator,
+                                       updateManager: updateManager,
+                                       preferences: preferences)
         let hostingView = NSHostingView(rootView: rootView)
         hostingView.layoutSubtreeIfNeeded()
         let fittingSize = hostingView.fittingSize
@@ -229,8 +200,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             defer: false
         )
         window.contentView = hostingView
-        configurePreferencesWindow(window)
-        fallbackPreferencesWindow = window
+        configureSettingsWindow(window)
+        fallbackSettingsWindow = window
         window.makeKeyAndOrderFront(nil)
     }
 }

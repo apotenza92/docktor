@@ -1,12 +1,18 @@
 import Foundation
+import os
 
-/// Lightweight logger that writes to unified logging (NSLog) and a per-run log file
+/// Lightweight logger that writes to unified logging (os.Logger) and a per-run log file
 /// under ~/Code/Docktor/logs/Docktor-<timestamp>.log so you can find it alongside the project.
 enum Logger {
     private static let debugEnabled: Bool = {
         let v = ProcessInfo.processInfo.environment["DOCKTOR_DEBUG_LOG"]?.lowercased()
         return v == "1" || v == "true" || v == "yes"
     }()
+
+    private static let oslog = os.Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "pzc.Dockter",
+        category: "general"
+    )
 
     private static let queue = DispatchQueue(label: "com.dockappexpose.logger")
     private static let logDirectory: URL = {
@@ -24,6 +30,7 @@ enum Logger {
 
     static func log(_ message: String) {
         let line = "Docktor: \(message)"
+        oslog.log("\(line, privacy: .public)")
         NSLog("%@", line)
         queue.async {
             writeLine(line)

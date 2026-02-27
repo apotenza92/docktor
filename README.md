@@ -33,6 +33,20 @@ Manual:
 2. Move `Docktor.app` (or `Docktor Beta.app`) to `/Applications`.
 3. Launch once and grant permissions.
 
+## Open Settings Manually
+
+If the menu bar icon is hidden, you can force-open settings via Terminal:
+
+```bash
+open -a Docktor --args --settings
+```
+
+Or via URL handler:
+
+```bash
+open "docktor://settings"
+```
+
 ## Required macOS Permissions
 
 - Accessibility

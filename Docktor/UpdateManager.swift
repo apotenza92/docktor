@@ -4,11 +4,11 @@ import Sparkle
 
 @MainActor
 final class UpdateManager: NSObject, ObservableObject, SPUUpdaterDelegate {
-    static let shared = UpdateManager()
+    static let shared = UpdateManager(preferences: Preferences.shared)
 
     @Published private(set) var canCheckForUpdates = false
 
-    private let preferences = Preferences.shared
+    private let preferences: Preferences
     private var updateCheckTimer: Timer?
     private var cancellables: Set<AnyCancellable> = []
     private var didConfigure = false
@@ -19,7 +19,8 @@ final class UpdateManager: NSObject, ObservableObject, SPUUpdaterDelegate {
         userDriverDelegate: nil
     )
 
-    private override init() {
+    init(preferences: Preferences) {
+        self.preferences = preferences
         super.init()
     }
 

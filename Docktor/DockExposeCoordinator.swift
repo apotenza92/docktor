@@ -4,12 +4,12 @@ import ApplicationServices
 
 @MainActor
 final class DockExposeCoordinator: ObservableObject {
-    static let shared = DockExposeCoordinator()
+    static let shared = DockExposeCoordinator(preferences: Preferences.shared)
 
     private let eventTap = DockClickEventTap()
     private let invoker = AppExposeInvoker()
-    private let preferences = Preferences.shared
-    private var permissionPollTimer: Timer?
+    private let preferences: Preferences
+    private var permissionPollTask: Task<Void, Never>?
     private var lastTriggeredBundle: String? // Track which app we last triggered Exposé for - ignore clicks on same app until different app is clicked
     private var currentExposeApp: String? // Track which app's windows are currently being shown in App Exposé (can differ from lastTriggeredBundle)
     private var appsWithoutWindowsInExpose: Set<String> = [] // Track apps clicked in App Exposé that have no windows
@@ -27,6 +27,10 @@ final class DockExposeCoordinator: ObservableObject {
     private var appExposeInvocationToken: UUID?
     private var clickRecoveryTokenCounter: UInt64 = 0
     private var clickSequenceCounter: UInt64 = 0
+
+    init(preferences: Preferences) {
+        self.preferences = preferences
+    }
 
     @Published private(set) var isRunning = false
     @Published private(set) var accessibilityGranted = AXIsProcessTrusted()
@@ -118,6 +122,8 @@ final class DockExposeCoordinator: ObservableObject {
     }
 
     func stop() {
+        permissionPollTask?.cancel()
+        permissionPollTask = nil
         eventTap.stop()
         isRunning = false
         Logger.log("Event tap stopped.")
@@ -324,27 +330,35 @@ final class DockExposeCoordinator: ObservableObject {
     }
 
     func startWhenPermissionAvailable(pollInterval: TimeInterval = 1.5) {
-        permissionPollTimer?.invalidate()
-        permissionPollTimer = Timer.scheduledTimer(timeInterval: pollInterval,
-                                                   target: self,
-                                                   selector: #selector(handlePermissionPoll(_:)),
-                                                   userInfo: nil,
-                                                   repeats: true)
-    }
+        permissionPollTask?.cancel()
+        permissionPollTask = Task { [weak self] in
+            guard let self else { return }
+            let intervalNs = UInt64(max(pollInterval, 0.2) * 1_000_000_000)
 
-    @objc private func handlePermissionPoll(_ timer: Timer) {
-        let trusted = AXIsProcessTrusted()
-        let input = CGPreflightListenEventAccess()
-        accessibilityGranted = trusted
-        inputMonitoringGranted = input
-        secureEventInputEnabled = SecureEventInput.isEnabled()
-        if trusted && input {
-            timer.invalidate()
-            permissionPollTimer = nil
-            startIfPossible()
-            Logger.log("Accessibility granted detected via polling; started tap.")
-        } else {
-            Logger.log("Permissions still not granted (accessibility=\(trusted), input=\(input)); polling continues.")
+            while !Task.isCancelled {
+                let trusted = AXIsProcessTrusted()
+                let input = CGPreflightListenEventAccess()
+                let secureInput = SecureEventInput.isEnabled()
+
+                accessibilityGranted = trusted
+                inputMonitoringGranted = input
+                secureEventInputEnabled = secureInput
+
+                if trusted && input {
+                    permissionPollTask = nil
+                    startIfPossible()
+                    Logger.log("Accessibility granted detected via polling; started tap.")
+                    return
+                }
+
+                Logger.log("Permissions still not granted (accessibility=\(trusted), input=\(input)); polling continues.")
+
+                do {
+                    try await Task.sleep(nanoseconds: intervalNs)
+                } catch {
+                    return
+                }
+            }
         }
     }
 
@@ -921,6 +935,42 @@ final class DockExposeCoordinator: ObservableObject {
         }
     }
 
+    private func decisionBehavior(from behavior: FirstClickBehavior) -> DecisionFirstClickBehavior {
+        switch behavior {
+        case .activateApp:
+            return .activateApp
+        case .bringAllToFront:
+            return .bringAllToFront
+        case .appExpose:
+            return .appExpose
+        }
+    }
+
+    private func decisionAction(from action: DockAction) -> DecisionDockAction {
+        switch action {
+        case .none:
+            return .none
+        case .activateApp:
+            return .activateApp
+        case .hideApp:
+            return .hideApp
+        case .appExpose:
+            return .appExpose
+        case .minimizeAll:
+            return .minimizeAll
+        case .quitApp:
+            return .quitApp
+        case .bringAllToFront:
+            return .bringAllToFront
+        case .hideOthers:
+            return .hideOthers
+        case .singleAppMode:
+            return .singleAppMode
+        @unknown default:
+            return .none
+        }
+    }
+
     private func executeFirstClickBehavior(for bundleIdentifier: String,
                                            frontmostBefore: String?,
                                            windowCountHint: Int? = nil,
@@ -1200,16 +1250,12 @@ final class DockExposeCoordinator: ObservableObject {
     }
 
     private func isAppExposeInteractionActive(frontmostBefore: String?) -> Bool {
-        // Treat in-flight invocation as active.
-        if appExposeInvocationToken != nil {
-            return true
-        }
-
-        // Dock-frontmost can briefly happen during normal focus transitions.
-        // Only treat it as active App Exposé when we have recent Exposé tracking state.
-        guard frontmostBefore == "com.apple.dock" else { return false }
-        guard lastTriggeredBundle != nil || currentExposeApp != nil else { return false }
-        return isRecentExposeInteraction(maxAge: 1.2)
+        DockDecisionEngine.isAppExposeInteractionActive(
+            hasInvocationToken: appExposeInvocationToken != nil,
+            frontmostBefore: frontmostBefore,
+            hasTrackingState: lastTriggeredBundle != nil || currentExposeApp != nil,
+            isRecentInteraction: isRecentExposeInteraction(maxAge: 1.2)
+        )
     }
 
     private func shouldPromotePostExposeDismissClickToFirstClick(bundleIdentifier: String,
@@ -1234,20 +1280,12 @@ final class DockExposeCoordinator: ObservableObject {
         let isRunning = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundleIdentifier }
 
         if modifier == .none {
-            switch preferences.firstClickBehavior {
-            case .activateApp:
-                return false
-            case .bringAllToFront:
-                return isRunning
-            case .appExpose:
-                guard isRunning else { return false }
-                if (windowCountHint ?? WindowManager.totalWindowCount(bundleIdentifier: bundleIdentifier)) == 0 {
-                    // Keep no-window fallback pass-through to preserve Dock press/release lifecycle.
-                    return false
-                }
-                // Do not consume App Exposé first-click; keep Dock click semantics intact.
-                return false
-            }
+            let windowCount = windowCountHint ?? WindowManager.totalWindowCount(bundleIdentifier: bundleIdentifier)
+            return DockDecisionEngine.shouldConsumeFirstClickPlainAction(
+                firstClickBehavior: decisionBehavior(from: preferences.firstClickBehavior),
+                isRunning: isRunning,
+                windowCount: windowCount
+            )
         }
 
         guard isRunning else { return false }
@@ -1264,26 +1302,38 @@ final class DockExposeCoordinator: ObservableObject {
             action = .none
         }
 
-        if action == .appExpose,
-           !shouldRunFirstClickAppExpose(for: bundleIdentifier, windowCountHint: windowCountHint) {
-            return false
+        let canRunAppExpose: Bool
+        if action == .appExpose {
+            canRunAppExpose = shouldRunFirstClickAppExpose(for: bundleIdentifier, windowCountHint: windowCountHint)
+            if !canRunAppExpose {
+                return false
+            }
+        } else {
+            canRunAppExpose = true
         }
 
-        return action != .none && action != .appExpose
+        return DockDecisionEngine.shouldConsumeFirstClickModifierAction(
+            action: decisionAction(from: action),
+            isRunning: isRunning,
+            canRunAppExpose: canRunAppExpose
+        )
     }
 
     private func shouldRunFirstClickAppExpose(for bundleIdentifier: String,
                                               windowCountHint: Int? = nil) -> Bool {
         let windowCount = windowCountHint ?? WindowManager.totalWindowCount(bundleIdentifier: bundleIdentifier)
-        if windowCount == 0 {
-            Logger.debug("WORKFLOW: First click appExpose skipped for \(bundleIdentifier): no windows")
-            return false
+        let shouldRun = DockDecisionEngine.shouldRunFirstClickAppExpose(
+            windowCount: windowCount,
+            requiresMultipleWindows: preferences.firstClickAppExposeRequiresMultipleWindows
+        )
+        if !shouldRun {
+            if windowCount == 0 {
+                Logger.debug("WORKFLOW: First click appExpose skipped for \(bundleIdentifier): no windows")
+            } else if preferences.firstClickAppExposeRequiresMultipleWindows && windowCount < 2 {
+                Logger.debug("WORKFLOW: First click appExpose skipped for \(bundleIdentifier): fewer than two windows")
+            }
         }
-        if preferences.firstClickAppExposeRequiresMultipleWindows, windowCount < 2 {
-            Logger.debug("WORKFLOW: First click appExpose skipped for \(bundleIdentifier): fewer than two windows")
-            return false
-        }
-        return true
+        return shouldRun
     }
 
     private func performActivateAppAction(bundleIdentifier: String) -> Bool {
