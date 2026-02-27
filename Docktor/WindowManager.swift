@@ -15,27 +15,39 @@ enum WindowManager {
             Logger.log("WindowManager: App \(bundleIdentifier) is not running")
             return false
         }
-        
-        // First try the direct NSRunningApplication hide
-        if app.hide() {
+
+        // First try the direct NSRunningApplication hide.
+        let hideRequested = app.hide()
+        if hideRequested, waitForHidden(app, timeout: 0.35) {
             Logger.log("WindowManager: hide() succeeded for \(bundleIdentifier)")
             return true
         }
-        
+
         if app.isHidden {
             Logger.log("WindowManager: App \(bundleIdentifier) already hidden; treating as success")
             return true
         }
-        
-        // Try Accessibility hide as a stronger fallback
+
+        // Try Accessibility hide as a stronger fallback.
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         let hidden: CFBoolean = kCFBooleanTrue
-        if AXUIElementSetAttributeValue(appElement, kAXHiddenAttribute as CFString, hidden) == .success {
+        if AXUIElementSetAttributeValue(appElement, kAXHiddenAttribute as CFString, hidden) == .success,
+           waitForHidden(app, timeout: 0.35) {
             Logger.log("WindowManager: AX hide succeeded for \(bundleIdentifier)")
             return true
         }
 
-        Logger.log("WindowManager: AX hide failed for \(bundleIdentifier)")
+        // Final fallback: activate target app then send Cmd+H.
+        _ = app.activate(options: [.activateIgnoringOtherApps])
+        let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        if frontmost == bundleIdentifier,
+           KeyChordSender.postSimple(keyCode: 4, flags: .maskCommand),
+           waitForHidden(app, timeout: 0.35) {
+            Logger.log("WindowManager: Cmd+H fallback succeeded for \(bundleIdentifier)")
+            return true
+        }
+
+        Logger.log("WindowManager: Failed to hide \(bundleIdentifier) (hideRequested=\(hideRequested), frontmost=\(frontmost ?? "nil"))")
         return false
     }
     
@@ -386,6 +398,24 @@ enum WindowManager {
             _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(pollInterval))
         }
         return app.isTerminated
+    }
+
+    private static func waitForHidden(_ app: NSRunningApplication,
+                                      timeout: TimeInterval,
+                                      pollInterval: TimeInterval = 0.05) -> Bool {
+        if app.isHidden {
+            return true
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if app.isHidden {
+                return true
+            }
+            _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(pollInterval))
+        }
+
+        return app.isHidden
     }
 
     private static func appWindows(for app: NSRunningApplication) -> [AXUIElement] {

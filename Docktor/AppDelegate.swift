@@ -101,9 +101,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusMenu.removeAllItems()
 
         let preferencesItem = NSMenuItem(title: "Preferences…",
-                                         action: #selector(showPreferences),
+                                         action: Selector(("showSettingsWindow:")),
                                          keyEquivalent: ",")
-        preferencesItem.target = self
+        preferencesItem.target = nil
         statusMenu.addItem(preferencesItem)
 
         statusMenu.addItem(.separator())
@@ -115,11 +115,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusMenu.addItem(quitItem)
     }
     
-    @objc private func showPreferences() {
-        showPreferencesWindow()
-        Logger.log("Status menu preferences triggered.")
-    }
-
     @objc private func quit() {
         NSApp.terminate(nil)
     }

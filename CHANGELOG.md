@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.0.13]
+
+- Fixed status-bar `Preferences…` action routing to use the standard Settings responder path, preventing crashes when opening settings from the menu bar icon.
+- Improved Dock click target reliability by re-resolving the Dock icon bundle on mouse-up before executing actions.
+- Hardened `Hide App` execution with post-hide verification and fallback paths, fixing intermittent active-app hide behavior.
+- Reduced App Exposé state false-positives and removed swallowed-click/third-click no-op regressions in repeated Dock interactions.
+
 ## [v0.0.12]
 
 - Split App Expose gating into two independent `>1 window only` settings: one for `First Click` and one for `Active App` (click-after-activation).

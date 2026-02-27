@@ -454,14 +454,31 @@ final class DockExposeCoordinator: ObservableObject {
                 return false
             }
 
-            Logger.debug("APP_EXPOSE_TRACE: click=\(context.clickSequence) phase=up bundle=\(context.clickedBundle) frontmostBefore=\(context.frontmostBefore ?? "nil") windowsAtDown=\(context.windowCountAtMouseDown.map(String.init) ?? "nil") consumePlanned=\(context.consumeClick) fallbackLatched=\(context.forceFirstClickActivateFallback)")
-            let consumeNow = executeClickAction(context)
+            let resolvedBundleAtMouseUp = bundleIdentifierNearPoint(location) ?? context.clickedBundle
+            let effectiveContext: PendingClickContext
+            if resolvedBundleAtMouseUp != context.clickedBundle {
+                Logger.debug("WORKFLOW: Bundle corrected on mouse-up from \(context.clickedBundle) to \(resolvedBundleAtMouseUp)")
+                effectiveContext = PendingClickContext(clickSequence: context.clickSequence,
+                                                       location: context.location,
+                                                       buttonNumber: context.buttonNumber,
+                                                       flags: context.flags,
+                                                       frontmostBefore: context.frontmostBefore,
+                                                       clickedBundle: resolvedBundleAtMouseUp,
+                                                       windowCountAtMouseDown: context.windowCountAtMouseDown,
+                                                       consumeClick: context.consumeClick,
+                                                       forceFirstClickActivateFallback: context.forceFirstClickActivateFallback)
+            } else {
+                effectiveContext = context
+            }
+
+            Logger.debug("APP_EXPOSE_TRACE: click=\(effectiveContext.clickSequence) phase=up bundle=\(effectiveContext.clickedBundle) frontmostBefore=\(effectiveContext.frontmostBefore ?? "nil") windowsAtDown=\(effectiveContext.windowCountAtMouseDown.map(String.init) ?? "nil") consumePlanned=\(effectiveContext.consumeClick) fallbackLatched=\(effectiveContext.forceFirstClickActivateFallback)")
+            let consumeNow = executeClickAction(effectiveContext)
             if consumeNow != context.consumeClick {
                 Logger.debug("WORKFLOW: Click consume mismatch click=\(context.clickSequence) planned=\(context.consumeClick) actual=\(consumeNow)")
             }
             // Only recover Dock pressed state when we actually consumed the click-up.
             // If execution resolved to pass-through, synthetic release can interfere with Dock state.
-            let shouldRecoverDockPressedState = consumeNow
+            let shouldRecoverDockPressedState = consumeNow && shouldRecoverDockPressedState(after: lastActionExecuted)
             if shouldRecoverDockPressedState {
                 clickRecoveryTokenCounter += 1
                 let recoveryToken = clickRecoveryTokenCounter
@@ -474,16 +491,49 @@ final class DockExposeCoordinator: ObservableObject {
         }
     }
 
+    private func shouldRecoverDockPressedState(after action: DockAction?) -> Bool {
+        guard let action else { return false }
+        // App Exposé clicks are pass-through and should never require recovery.
+        return action != .appExpose
+    }
+
     private func scheduleDockPressedStateRecovery(at location: CGPoint,
                                                   flags: CGEventFlags,
                                                   expectedBundle: String,
                                                   clickToken: UInt64) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.008) { [weak self] in
             guard let self else { return }
-            let releasePoint = location
+            let releasePoint = self.neutralRecoveryPoint(from: location)
             postSyntheticMouseUpPassthrough(at: releasePoint, flags: flags)
             Logger.debug("WORKFLOW: Posted neutral mouse-up recovery token=\(clickToken) bundle=\(expectedBundle) point=(\(Int(releasePoint.x)),\(Int(releasePoint.y)))")
         }
+    }
+
+    private func neutralRecoveryPoint(from location: CGPoint) -> CGPoint {
+        guard let offscreen = offscreenRecoveryPoint() else {
+            return location
+        }
+        return offscreen
+    }
+
+    private func offscreenRecoveryPoint() -> CGPoint? {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else {
+            return nil
+        }
+
+        var displays = Array(repeating: CGDirectDisplayID(0), count: Int(count))
+        guard CGGetActiveDisplayList(count, &displays, &count) == .success else {
+            return nil
+        }
+
+        let bounds = displays.map(CGDisplayBounds)
+        guard let minX = bounds.map(\.minX).min(),
+              let minY = bounds.map(\.minY).min() else {
+            return nil
+        }
+
+        return CGPoint(x: minX - 120, y: minY - 120)
     }
 
     private func executeClickAction(_ context: PendingClickContext) -> Bool {
@@ -1150,16 +1200,16 @@ final class DockExposeCoordinator: ObservableObject {
     }
 
     private func isAppExposeInteractionActive(frontmostBefore: String?) -> Bool {
-        // Treat only an in-flight invocation or Dock-frontmost state as "active".
-        // `lastTriggeredBundle`/`currentExposeApp` are tracking context used for
-        // post-dismiss transition logic and should not block immediate re-entry.
+        // Treat in-flight invocation as active.
         if appExposeInvocationToken != nil {
             return true
         }
 
-        // App Exposé can be visible even when evidence heuristics are inconclusive.
-        // In that state the Dock is frontmost, so treat Dock-icon clicks as Exposé switches.
-        return frontmostBefore == "com.apple.dock"
+        // Dock-frontmost can briefly happen during normal focus transitions.
+        // Only treat it as active App Exposé when we have recent Exposé tracking state.
+        guard frontmostBefore == "com.apple.dock" else { return false }
+        guard lastTriggeredBundle != nil || currentExposeApp != nil else { return false }
+        return isRecentExposeInteraction(maxAge: 1.2)
     }
 
     private func shouldPromotePostExposeDismissClickToFirstClick(bundleIdentifier: String,
