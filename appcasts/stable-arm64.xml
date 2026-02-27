@@ -5,19 +5,20 @@
     <description>Docktor update feed (stable channel)</description>
     <language>en</language>
     <item>
-      <title>Version 0.0.12</title>
-      <link>https://github.com/apotenza92/docktor/releases/tag/v0.0.12</link>
-      <sparkle:version>1290000</sparkle:version>
-      <sparkle:shortVersionString>0.0.12</sparkle:shortVersionString>
+      <title>Version 0.0.13</title>
+      <link>https://github.com/apotenza92/docktor/releases/tag/v0.0.13</link>
+      <sparkle:version>1390000</sparkle:version>
+      <sparkle:shortVersionString>0.0.13</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
       <sparkle:fullReleaseNotesLink>https://github.com/apotenza92/docktor/blob/main/CHANGELOG.md</sparkle:fullReleaseNotesLink>
-      <description sparkle:format="plain-text"><![CDATA[- Split App Expose gating into two independent `>1 window only` settings: one for `First Click` and one for `Active App` (click-after-activation).
-- Updated the mappings table UI to surface and center the separate toggles only when each corresponding action is set to `App Expose`.
-- Updated README defaults/behavior notes to reflect independent App Expose gating controls.]]></description>
-      <pubDate>Fri, 27 Feb 2026 03:48:29 +0000</pubDate>
-      <enclosure url="https://github.com/apotenza92/docktor/releases/download/v0.0.12/Docktor-v0.0.12-macos-arm64.zip"
-                 sparkle:edSignature="zjEBr8kXOEJJbzYP0nxKVoXSoOA32e+LajCDUAWC8BeGQIOuugyZbwZNyDe33zzppo+HDSb4yHMIRDv/jXslAQ=="
-                 length="4407493"
+      <description sparkle:format="plain-text"><![CDATA[- Fixed status-bar `Preferences…` action routing to use the standard Settings responder path, preventing crashes when opening settings from the menu bar icon.
+- Improved Dock click target reliability by re-resolving the Dock icon bundle on mouse-up before executing actions.
+- Hardened `Hide App` execution with post-hide verification and fallback paths, fixing intermittent active-app hide behavior.
+- Reduced App Exposé state false-positives and removed swallowed-click/third-click no-op regressions in repeated Dock interactions.]]></description>
+      <pubDate>Fri, 27 Feb 2026 08:36:38 +0000</pubDate>
+      <enclosure url="https://github.com/apotenza92/docktor/releases/download/v0.0.13/Docktor-v0.0.13-macos-arm64.zip"
+                 sparkle:edSignature="xTt2YltRYe33VWHDEx2vYQDibhkPz2SVnCrEh9Un8aJv1Ci3CCEz0xDHLZv7L4jVa10/I4zhzYfsGoLFuvKlBQ=="
+                 length="4409286"
                  type="application/octet-stream" />
     </item>
   </channel>
