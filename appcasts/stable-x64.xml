@@ -5,20 +5,19 @@
     <description>Docktor update feed (stable channel)</description>
     <language>en</language>
     <item>
-      <title>Version 0.0.10</title>
-      <link>https://github.com/apotenza92/docktor/releases/tag/v0.0.10</link>
-      <sparkle:version>1090000</sparkle:version>
-      <sparkle:shortVersionString>0.0.10</sparkle:shortVersionString>
+      <title>Version 0.0.12</title>
+      <link>https://github.com/apotenza92/docktor/releases/tag/v0.0.12</link>
+      <sparkle:version>1290000</sparkle:version>
+      <sparkle:shortVersionString>0.0.12</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
       <sparkle:fullReleaseNotesLink>https://github.com/apotenza92/docktor/blob/main/CHANGELOG.md</sparkle:fullReleaseNotesLink>
-      <description sparkle:format="plain-text"><![CDATA[- Renamed the product, project, release workflows, scripts, and repository from `Dockter` to `Docktor`.
-- Kept existing bundle identifiers (`pzc.Dockter` / `pzc.Dockter.beta`) so existing Sparkle users continue to upgrade in place.
-- Added launch-time migration that renames legacy installs (`DockActioner.app` and `Dockter.app`) to `Docktor.app` in `/Applications`.
-- Updated release automation and Sparkle appcast tooling for the new repository slug and `Docktor` artifact/cask names.]]></description>
-      <pubDate>Mon, 23 Feb 2026 04:13:50 +0000</pubDate>
-      <enclosure url="https://github.com/apotenza92/docktor/releases/download/v0.0.10/Docktor-v0.0.10-macos-x64.zip"
-                 sparkle:edSignature="uLQy0QI99y/PMPudh1hH/vDFaPscw7o4pD3PNTw4Kp37KKRrL0KoNfulGWX3Hn7k5+BICwhSl48b90nYa7liDw=="
-                 length="4409837"
+      <description sparkle:format="plain-text"><![CDATA[- Split App Expose gating into two independent `>1 window only` settings: one for `First Click` and one for `Active App` (click-after-activation).
+- Updated the mappings table UI to surface and center the separate toggles only when each corresponding action is set to `App Expose`.
+- Updated README defaults/behavior notes to reflect independent App Expose gating controls.]]></description>
+      <pubDate>Fri, 27 Feb 2026 03:48:29 +0000</pubDate>
+      <enclosure url="https://github.com/apotenza92/docktor/releases/download/v0.0.12/Docktor-v0.0.12-macos-x64.zip"
+                 sparkle:edSignature="tkZ/BBTsvY76OQNqE837BmP+zcfE03iDfVITH9WxdYiR3M1VwelgTsrn/LN1DoILL2xubV9qu/wdHpBnejsVDg=="
+                 length="4415921"
                  type="application/octet-stream" />
     </item>
   </channel>
