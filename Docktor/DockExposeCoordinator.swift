@@ -524,30 +524,12 @@ final class DockExposeCoordinator: ObservableObject {
     }
 
     private func neutralRecoveryPoint(from location: CGPoint) -> CGPoint {
-        guard let offscreen = offscreenRecoveryPoint() else {
-            return location
+        // Never synthesize mouse events at an off-cursor location.
+        // Posting at distant coordinates can cause visible cursor jumps.
+        if let current = CGEvent(source: nil)?.location {
+            return current
         }
-        return offscreen
-    }
-
-    private func offscreenRecoveryPoint() -> CGPoint? {
-        var count: UInt32 = 0
-        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else {
-            return nil
-        }
-
-        var displays = Array(repeating: CGDirectDisplayID(0), count: Int(count))
-        guard CGGetActiveDisplayList(count, &displays, &count) == .success else {
-            return nil
-        }
-
-        let bounds = displays.map(CGDisplayBounds)
-        guard let minX = bounds.map(\.minX).min(),
-              let minY = bounds.map(\.minY).min() else {
-            return nil
-        }
-
-        return CGPoint(x: minX - 120, y: minY - 120)
+        return location
     }
 
     private func executeClickAction(_ context: PendingClickContext) -> Bool {

@@ -6,6 +6,10 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.0.19]
+
+- Fixed synthetic Dock click recovery so it no longer posts mouse-up events at offscreen coordinates, preventing visible pointer jumps during actions like `Option+Click` Single App Mode.
+
 ## [v0.0.18]
 
 - Replaced SwiftUI `MenuBarExtra` settings routing with an AppKit `NSStatusItem` menu controller to eliminate status-menu reentrancy issues.
