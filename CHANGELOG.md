@@ -6,6 +6,10 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.0.11]
+
+- Reduced accidental scroll double-toggles by adding a cooldown guard for toggle-style scroll actions (`Hide App`, `Hide Others`, and `Single App Mode`).
+
 ## [v0.0.10]
 
 - Renamed the product, project, release workflows, scripts, and repository from `Dockter` to `Docktor`.
