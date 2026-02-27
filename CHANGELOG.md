@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.0.18]
+
+- Replaced SwiftUI `MenuBarExtra` settings routing with an AppKit `NSStatusItem` menu controller to eliminate status-menu reentrancy issues.
+- Replaced responder-chain settings opening (`showSettingsWindow:` / `showPreferencesWindow:`) with a dedicated AppKit `NSWindowController` hosting the existing SwiftUI preferences view.
+- Fixed a severe post-click CPU runaway (up to 100%) triggered by opening `Settings…` from the menu bar icon on some machines.
+- Validated with real pointer clicks (`cliclick`) in repeated menu open flows, including 30-iteration open/click-inside-controls/close stress with no crashes and no high-CPU runaway.
+
 ## [v0.0.17]
 
 - Fixed a settings-open crash in the SwiftUI menu flow by removing a recursive `showSettingsWindow:` bridge path in `AppDelegate`.

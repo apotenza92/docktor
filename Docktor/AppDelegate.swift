@@ -7,6 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var coordinator: DockExposeCoordinator { Self.services.coordinator }
     private var preferences: Preferences { Self.services.preferences }
     private var updateManager: UpdateManager { Self.services.updateManager }
+    private lazy var settingsWindowController = SettingsWindowController(services: Self.services)
+    private var menuBarController: MenuBarController?
     private let legacyAppBundleNames = ["DockActioner.app", "Dockter.app"]
     private let currentAppBundleName = "Docktor.app"
     private let openSettingsLaunchArguments: Set<String> = ["--settings", "-settings", "--open-settings"]
@@ -18,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         terminateOtherInstances()
 
+        menuBarController = MenuBarController(preferences: preferences, appDelegate: self)
         coordinator.startIfPossible()
         updateManager.configureForLaunch(isAutomatedMode: false)
 
@@ -31,8 +34,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async {
             if shouldShowWindow {
                 self.showSettingsWindow()
-            } else {
-                self.hideSettingsWindow()
             }
             self.handlePermissionsIfNeeded(allowPrompt: shouldShowWindow)
             if isFirstLaunch {
@@ -122,31 +123,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        showSettingsWindow()
-        return true
-    }
-
     func showSettingsWindow() {
         Logger.log("Opening settings window")
-        NSApp.activate(ignoringOtherApps: true)
-
-        let openedViaSettings = NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        if openedViaSettings {
-            return
-        }
-
-        let openedViaPreferences = NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-        if openedViaPreferences {
-            return
-        }
-
-        Logger.log("Unable to route to system settings window action")
-    }
-
-    private func hideSettingsWindow() {
-        NSApp.windows
-            .filter { $0.title == "Settings" || $0.title == "Docktor Settings" }
-            .forEach { $0.orderOut(nil) }
+        settingsWindowController.show()
     }
 }
