@@ -21,7 +21,7 @@ brew tap apotenza92/tap
 brew install --cask apotenza92/tap/docktor
 ```
 
-Beta (side-by-side as `Docktor Beta.app`):
+Beta (installs as a separate app, `Docktor Beta.app`, so you can keep stable `Docktor.app` installed too):
 
 ```bash
 brew install --cask apotenza92/tap/docktor@beta
@@ -49,14 +49,3 @@ System Settings paths:
 xcodebuild -project Docktor.xcodeproj -scheme Docktor -configuration Debug build
 ```
 
-## Release
-
-1. Ensure `Docktor.xcodeproj` `MARKETING_VERSION` matches the release version.
-2. Add the matching heading in `CHANGELOG.md` (`## [vX.Y.Z]` or `## [vX.Y.Z-beta.N]`).
-3. Tag and push with:
-
-```bash
-./scripts/release.sh 0.0.10
-# or prerelease
-./scripts/release.sh 0.0.10-beta.1
-```
