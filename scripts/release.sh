@@ -60,6 +60,18 @@ if [[ "$PROJECT_VERSION" != "$CORE_VERSION" ]]; then
   exit 1
 fi
 
+if [[ -n "${DOCKTOR_RELEASE_VALIDATION_WAIVER:-}" ]]; then
+  if [[ ! "$DOCKTOR_RELEASE_VALIDATION_WAIVER" =~ (https://github.com/.+/issues/[0-9]+|#[0-9]+) ]]; then
+    echo "Error: DOCKTOR_RELEASE_VALIDATION_WAIVER must reference an issue (e.g. #123 or full GitHub issue URL)"
+    exit 1
+  fi
+  echo "WARNING: skipping required release validation under waiver: $DOCKTOR_RELEASE_VALIDATION_WAIVER"
+else
+  echo "Running required pre-release validation..."
+  xcodebuild -project Docktor.xcodeproj -scheme Docktor -configuration Debug build
+  ./scripts/automated_settings_shell_checks.sh
+fi
+
 git tag "$TAG"
 git push origin "$TAG"
 

@@ -150,16 +150,21 @@ final class Preferences: ObservableObject {
     private let clickAppExposeRequiresMultipleWindowsKey = "clickAppExposeRequiresMultipleWindows"
     private let appExposeRequiresMultipleWindowsMapKey = "appExposeRequiresMultipleWindowsMap"
     private let firstClickModifierActionsMigratedKey = "firstClickModifierActionsMigrated_v6"
+    private let appExposeRequiresMultipleWindowsMapMigratedKey = "appExposeRequiresMultipleWindowsMapMigrated_v7"
 
     private static let showOnStartupPreferenceKey = PreferenceKey<Bool>(name: "showOnStartup", defaultValue: false)
     private static let showMenuBarIconPreferenceKey = PreferenceKey<Bool>(name: "showMenuBarIcon", defaultValue: true)
     private static let firstLaunchCompletedPreferenceKey = PreferenceKey<Bool>(name: "firstLaunchCompleted", defaultValue: false)
     private static let updateCheckFrequencyPreferenceKey = PreferenceKey<UpdateCheckFrequency>(name: "updateCheckFrequency", defaultValue: .daily)
-    private static let firstClickBehaviorPreferenceKey = PreferenceKey<FirstClickBehavior>(name: "firstClickBehavior", defaultValue: .activateApp)
+    private static let firstClickBehaviorPreferenceKey = PreferenceKey<FirstClickBehavior>(name: "firstClickBehavior", defaultValue: .appExpose)
     private static let lastUpdateCheckTimestampPreferenceKey = PreferenceKey<Double>(name: "lastUpdateCheckTimestamp", defaultValue: 0)
 
     // Prevent feedback loop when we adjust login item after a failed toggle.
     private var applyingLoginItemChange = false
+
+    private static var isAutomatedTestSuite: Bool {
+        ProcessInfo.processInfo.environment["DOCKTOR_TEST_SUITE"] == "1"
+    }
 
     @Published var clickAction: DockAction {
         didSet {
@@ -195,14 +200,21 @@ final class Preferences: ObservableObject {
     }
 
     func appExposeMultipleWindowsRequired(slot: String) -> Bool {
-        appExposeRequiresMultipleWindowsMap[slot] ?? true
+        appExposeRequiresMultipleWindowsMap[slot] ?? legacyAppExposeMultipleWindowsDefault(forSlot: slot)
     }
 
     func appExposeMultipleWindowsBinding(slot: String) -> Binding<Bool> {
         Binding(
-            get: { self.appExposeRequiresMultipleWindowsMap[slot] ?? true },
+            get: { self.appExposeRequiresMultipleWindowsMap[slot] ?? self.legacyAppExposeMultipleWindowsDefault(forSlot: slot) },
             set: { self.appExposeRequiresMultipleWindowsMap[slot] = $0 }
         )
+    }
+
+    private func legacyAppExposeMultipleWindowsDefault(forSlot slot: String) -> Bool {
+        if slot.hasPrefix("\(AppExposeSlotSource.firstClick.rawValue)_") {
+            return firstClickAppExposeRequiresMultipleWindows
+        }
+        return clickAppExposeRequiresMultipleWindows
     }
 
     @Published var firstClickShiftAction: DockAction {
@@ -292,7 +304,7 @@ final class Preferences: ObservableObject {
     @Published var showOnStartup: Bool {
         didSet {
             #if DEBUG
-            if !showOnStartup {
+            if !showOnStartup && !Self.isAutomatedTestSuite {
                 settingsStore.set(true, for: Self.showOnStartupPreferenceKey)
                 showOnStartup = true
                 Logger.log("Preferences: Forced showOnStartup on in development build")
@@ -306,7 +318,7 @@ final class Preferences: ObservableObject {
     @Published var showMenuBarIcon: Bool {
         didSet {
             #if DEBUG
-            if !showMenuBarIcon {
+            if !showMenuBarIcon && !Self.isAutomatedTestSuite {
                 settingsStore.set(true, for: Self.showMenuBarIconPreferenceKey)
                 showMenuBarIcon = true
                 Logger.log("Preferences: Forced showMenuBarIcon on in development build")
@@ -507,10 +519,12 @@ final class Preferences: ObservableObject {
         var showOnStartup = settingsStore.value(for: Self.showOnStartupPreferenceKey)
         var showMenuBarIcon = settingsStore.value(for: Self.showMenuBarIconPreferenceKey)
         #if DEBUG
-        showOnStartup = true
-        showMenuBarIcon = true
-        settingsStore.set(true, for: Self.showOnStartupPreferenceKey)
-        settingsStore.set(true, for: Self.showMenuBarIconPreferenceKey)
+        if !Self.isAutomatedTestSuite {
+            showOnStartup = true
+            showMenuBarIcon = true
+            settingsStore.set(true, for: Self.showOnStartupPreferenceKey)
+            settingsStore.set(true, for: Self.showMenuBarIconPreferenceKey)
+        }
         #endif
         let firstLaunchCompleted = settingsStore.value(for: Self.firstLaunchCompletedPreferenceKey)
 
@@ -529,7 +543,16 @@ final class Preferences: ObservableObject {
 
         let firstClickAppExposeRequiresMultipleWindows = userDefaults.object(forKey: firstClickAppExposeRequiresMultipleWindowsKey) as? Bool ?? true
         let clickAppExposeRequiresMultipleWindows = userDefaults.object(forKey: clickAppExposeRequiresMultipleWindowsKey) as? Bool ?? true
-        let appExposeRequiresMultipleWindowsMap = userDefaults.object(forKey: appExposeRequiresMultipleWindowsMapKey) as? [String: Bool] ?? [:]
+        var appExposeRequiresMultipleWindowsMap = userDefaults.object(forKey: appExposeRequiresMultipleWindowsMapKey) as? [String: Bool] ?? [:]
+
+        let appExposeMapMigrated = userDefaults.bool(forKey: appExposeRequiresMultipleWindowsMapMigratedKey)
+        if !appExposeMapMigrated {
+            Self.seedMissingAppExposeGateSlots(in: &appExposeRequiresMultipleWindowsMap,
+                                               firstClickDefault: firstClickAppExposeRequiresMultipleWindows,
+                                               activeAppDefault: clickAppExposeRequiresMultipleWindows)
+            userDefaults.set(appExposeRequiresMultipleWindowsMap, forKey: appExposeRequiresMultipleWindowsMapKey)
+            userDefaults.set(true, forKey: appExposeRequiresMultipleWindowsMapMigratedKey)
+        }
 
         // Assign stored properties last
         self.clickAction = clickAction
@@ -568,9 +591,41 @@ final class Preferences: ObservableObject {
         defaults.set(action.rawValue, forKey: key)
     }
 
+    private static func seedMissingAppExposeGateSlots(in map: inout [String: Bool],
+                                                      firstClickDefault: Bool,
+                                                      activeAppDefault: Bool) {
+        let firstClickModifiers: [AppExposeSlotModifier] = [.shift, .option, .shiftOption]
+        let clickModifiers: [AppExposeSlotModifier] = [.shift, .option, .shiftOption]
+        let scrollSources: [AppExposeSlotSource] = [.scrollUp, .scrollDown]
+        let scrollModifiers: [AppExposeSlotModifier] = [.none, .shift, .option, .shiftOption]
+
+        for modifier in firstClickModifiers {
+            let slot = AppExposeSlotKey.make(source: .firstClick, modifier: modifier)
+            if map[slot] == nil {
+                map[slot] = firstClickDefault
+            }
+        }
+
+        for modifier in clickModifiers {
+            let slot = AppExposeSlotKey.make(source: .click, modifier: modifier)
+            if map[slot] == nil {
+                map[slot] = activeAppDefault
+            }
+        }
+
+        for source in scrollSources {
+            for modifier in scrollModifiers {
+                let slot = AppExposeSlotKey.make(source: source, modifier: modifier)
+                if map[slot] == nil {
+                    map[slot] = activeAppDefault
+                }
+            }
+        }
+    }
+
     func resetMappingsToDefaults() {
         clickAction = .appExpose
-        firstClickBehavior = .activateApp
+        firstClickBehavior = .appExpose
         firstClickAppExposeRequiresMultipleWindows = true
         clickAppExposeRequiresMultipleWindows = true
         appExposeRequiresMultipleWindowsMap = [:]

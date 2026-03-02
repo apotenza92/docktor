@@ -52,7 +52,7 @@ start_docktor() {
   shift
   ensure_no_docktor
   : > "$log_file"
-  DOCKTOR_DEBUG_LOG=1 "$APP_BIN" "$@" >>"$log_file" 2>&1 &
+  DOCKTOR_DEBUG_LOG=1 DOCKTOR_TEST_SUITE=1 "$APP_BIN" "$@" >>"$log_file" 2>&1 &
   APP_PID=$!
   sleep 2
 }

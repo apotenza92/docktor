@@ -20,6 +20,46 @@ count_menu_bar_items() {
   osascript -e 'tell application "System Events" to tell process "ControlCenter" to get count of menu bar items of menu bar 1'
 }
 
+wait_for_menu_bar_min_count() {
+  local minimum="$1"
+  local timeout_seconds="${2:-8}"
+  local deadline=$((SECONDS + timeout_seconds))
+  local current=""
+
+  while (( SECONDS < deadline )); do
+    current="$(count_menu_bar_items)"
+    if [[ "$current" -ge "$minimum" ]]; then
+      echo "$current"
+      return 0
+    fi
+    sleep 0.25
+  done
+
+  current="$(count_menu_bar_items)"
+  echo "$current"
+  return 1
+}
+
+wait_for_menu_bar_exact_count() {
+  local expected="$1"
+  local timeout_seconds="${2:-8}"
+  local deadline=$((SECONDS + timeout_seconds))
+  local current=""
+
+  while (( SECONDS < deadline )); do
+    current="$(count_menu_bar_items)"
+    if [[ "$current" -eq "$expected" ]]; then
+      echo "$current"
+      return 0
+    fi
+    sleep 0.25
+  done
+
+  current="$(count_menu_bar_items)"
+  echo "$current"
+  return 1
+}
+
 echo "[settings-shell] ensure deterministic Dock geometry"
 set_dock_autohide false
 
@@ -27,12 +67,12 @@ echo "[settings-shell] menu icon toggle"
 base_count="$(count_menu_bar_items)"
 write_pref_bool showMenuBarIcon true
 start_docktor /tmp/docktor-settings-shell-on.log
-on_count="$(count_menu_bar_items)"
+on_count="$(wait_for_menu_bar_min_count "$((base_count + 1))" 10 || true)"
 stop_docktor
 
 write_pref_bool showMenuBarIcon false
 start_docktor /tmp/docktor-settings-shell-off.log
-off_count="$(count_menu_bar_items)"
+off_count="$(wait_for_menu_bar_exact_count "$base_count" 10 || true)"
 stop_docktor
 
 echo "  counts base=$base_count on=$on_count off=$off_count"
@@ -41,7 +81,7 @@ if [[ "$on_count" -lt "$((base_count + 1))" ]]; then
   exit 1
 fi
 if [[ "$off_count" -ne "$base_count" ]]; then
-  echo "  FAIL: expected icon-off menu count to return to baseline"
+  echo "  FAIL: expected icon-off menu count to return to baseline (after wait)"
   exit 1
 fi
 

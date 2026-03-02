@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.0.22] - 2026-03-02
+
+- Restored first-click default/reset behavior to `App Exposé`.
+- Added compatibility migration + legacy fallback seeding for per-slot App Exposé `>1 window only` gates (from legacy first-click/active-click preferences).
+- Aligned scroll up/down routing with macOS Natural vs Standard scrolling mode and added unit coverage for both mappings.
+- Hardened settings shell automation with menu-bar count wait/retry and made `scripts/release.sh` run required pre-tag validation by default (waiver now requires an issue reference).
+
 ## [v0.0.21]
 
 - Fixed Allen-reported Dock regression cases: wrong-target/finicky `Hide App` behavior and swallowed third click during repeated App Exposé clicks.

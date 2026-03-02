@@ -18,6 +18,11 @@ enum DecisionDockAction {
     case singleAppMode
 }
 
+enum DecisionScrollDirection: Equatable {
+    case up
+    case down
+}
+
 enum DockDecisionEngine {
     static func isAppExposeInteractionActive(hasInvocationToken: Bool,
                                              frontmostBefore: String?,
@@ -71,5 +76,13 @@ enum DockDecisionEngine {
         default:
             return true
         }
+    }
+
+    static func resolvedScrollDirection(delta: Double,
+                                        naturalScrollingEnabled: Bool) -> DecisionScrollDirection {
+        if naturalScrollingEnabled {
+            return delta > 0 ? .up : .down
+        }
+        return delta > 0 ? .down : .up
     }
 }

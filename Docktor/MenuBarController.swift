@@ -65,7 +65,8 @@ final class MenuBarController: NSObject {
 
     private func applyVisibility(_ visible: Bool) {
         #if DEBUG
-        let shouldShow = true
+        let runningAutomation = ProcessInfo.processInfo.environment["DOCKTOR_TEST_SUITE"] == "1"
+        let shouldShow = runningAutomation ? visible : true
         #else
         let shouldShow = visible
         #endif
