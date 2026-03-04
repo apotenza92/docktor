@@ -24,7 +24,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let launchRequestsSettings = ProcessInfo.processInfo.arguments.contains { openSettingsLaunchArguments.contains($0) }
         let launchedFromFinder = isFinderLaunch()
-        let shouldRequestSettingsFromExisting = launchRequestsSettings || launchedFromFinder
+        let explicitSettingsRequest = launchRequestsSettings || launchedFromFinder
+
+        // Important: do NOT hand off Finder launches to an existing instance.
+        // Sparkle relaunches and in-app restart flows also look like Finder launches (`-psn_`),
+        // and handing those off can cause the freshly launched process to exit.
+        let shouldRequestSettingsFromExisting = launchRequestsSettings
 
         if resolveRunningInstances(shouldRequestSettingsFromExisting: shouldRequestSettingsFromExisting) {
             return
@@ -35,7 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateManager.configureForLaunch(isAutomatedMode: false)
 
         let isFirstLaunch = !preferences.firstLaunchCompleted
-        let shouldShowWindow = shouldRequestSettingsFromExisting || isFirstLaunch || preferences.showOnStartup
+        let shouldShowWindow = explicitSettingsRequest || isFirstLaunch || preferences.showOnStartup
         if launchRequestsSettings {
             Logger.log("Launch argument requested settings window")
         }
@@ -44,7 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         DispatchQueue.main.async {
-            if shouldRequestSettingsFromExisting {
+            if explicitSettingsRequest {
                 self.restoreMenuBarIconIfNeeded()
             }
             if shouldShowWindow {

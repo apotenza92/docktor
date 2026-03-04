@@ -6,6 +6,11 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.0.27]
+
+- Fixed a Sparkle relaunch regression where `Install and Relaunch` could fail to reopen the app if a Finder-style relaunch (`-psn_`) was incorrectly treated as a settings-handoff launch.
+- Restricted running-instance settings handoff to explicit `--settings` launches only, while preserving "click app icon to open Settings" behavior for normal Finder/Dock launches.
+
 ## [v0.0.26]
 
 - Restored settings discoverability for background-only launches: opening Docktor from Applications/Dock now reliably opens the settings window, including when another Docktor instance is already running.
