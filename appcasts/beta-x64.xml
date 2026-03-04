@@ -5,18 +5,19 @@
     <description>Docktor update feed (beta channel)</description>
     <language>en</language>
     <item>
-      <title>Version 0.0.30</title>
-      <link>https://github.com/apotenza92/docktor/releases/tag/v0.0.30</link>
-      <sparkle:version>3090000</sparkle:version>
-      <sparkle:shortVersionString>0.0.30</sparkle:shortVersionString>
+      <title>Version 0.0.31</title>
+      <link>https://github.com/apotenza92/docktor/releases/tag/v0.0.31</link>
+      <sparkle:version>3190000</sparkle:version>
+      <sparkle:shortVersionString>0.0.31</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
       <sparkle:fullReleaseNotesLink>https://github.com/apotenza92/docktor/blob/main/CHANGELOG.md</sparkle:fullReleaseNotesLink>
-      <description sparkle:format="plain-text"><![CDATA[- Fixed Sparkle feed URL injection for packaged builds by parameterizing `SUFeedURL` in `Docktor/Info.plist` (`$(SU_FEED_URL)`) and overriding it per release matrix entry.
-- Beta artifacts now embed the Beta appcast URL directly (`beta-arm64` / `beta-x64`), ensuring Beta users receive the Beta track (which already advances to newer stable versions when they surpass prereleases).]]></description>
-      <pubDate>Wed, 04 Mar 2026 04:15:45 +0000</pubDate>
-      <enclosure url="https://github.com/apotenza92/docktor/releases/download/v0.0.30/Docktor-Beta-v0.0.30-macos-x64.zip"
-                 sparkle:edSignature="LcCnDG70+sBp/wLqQkAjmiJTl+tCO2relY0qRJyRupfr6L1IHcdeq7oeQlJFpxHmmjDBH1A7f9Qtb80ySMFhAg=="
-                 length="2655606"
+      <description sparkle:format="plain-text"><![CDATA[- Refreshed automation reliability to prevent opaque "operation aborted" runs: shared preflight checks, dynamic Debug app discovery, deterministic app selection, and explicit startup/readiness health checks in `scripts/lib/test_common.sh`.
+- Hardened App Exposé runtime state handling under rapid churn by confirming invocation evidence before committing tracking state, plus explicit rollback/reset when invocation is unconfirmed.
+- Improved event-tap timeout recovery and reduced debug logging pressure to avoid stale/latching interaction state after tap timeout conditions.]]></description>
+      <pubDate>Wed, 04 Mar 2026 08:25:59 +0000</pubDate>
+      <enclosure url="https://github.com/apotenza92/docktor/releases/download/v0.0.31/Docktor-Beta-v0.0.31-macos-x64.zip"
+                 sparkle:edSignature="jhJ1yn0Pl2IIZ8D9HaBxq+OWV/bm5fi5wYyXnVqoGwztjeVQjubS+x1bCmK76qrWVv4xwvSBv6EHxopQexfWDw=="
+                 length="2656924"
                  type="application/octet-stream" />
     </item>
   </channel>
