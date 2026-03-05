@@ -503,7 +503,8 @@ final class DockExposeCoordinator: ObservableObject {
                 let recoveryToken = clickRecoveryTokenCounter
                 scheduleDockPressedStateRecovery(at: context.location,
                                                 expectedBundle: context.clickedBundle,
-                                                clickToken: recoveryToken)
+                                                clickToken: recoveryToken,
+                                                action: lastActionExecuted)
             }
             return consumeNow
         }
@@ -518,16 +519,26 @@ final class DockExposeCoordinator: ObservableObject {
 
     private func scheduleDockPressedStateRecovery(at location: CGPoint,
                                                   expectedBundle: String,
-                                                  clickToken: UInt64) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.008) { [weak self] in
-            guard let self else { return }
-            guard clickToken == self.clickRecoveryTokenCounter else {
-                Logger.debug("WORKFLOW: Skipping stale mouse-up recovery token=\(clickToken) latest=\(self.clickRecoveryTokenCounter)")
-                return
+                                                  clickToken: UInt64,
+                                                  action: DockAction?) {
+        var recoveryDelays: [TimeInterval] = [0.008]
+        if action == .minimizeAll {
+            // Minimize can reshuffle Dock state quickly; a second release pulse avoids
+            // occasional long-press/context-menu fallthrough when the first release races.
+            recoveryDelays.append(0.12)
+        }
+
+        for (index, delay) in recoveryDelays.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                guard clickToken == self.clickRecoveryTokenCounter else {
+                    Logger.debug("WORKFLOW: Skipping stale mouse-up recovery token=\(clickToken) latest=\(self.clickRecoveryTokenCounter)")
+                    return
+                }
+                let releasePoint = self.neutralRecoveryPoint(from: location)
+                postSyntheticMouseUpPassthrough(at: releasePoint, flags: [])
+                Logger.debug("WORKFLOW: Posted neutral mouse-up recovery token=\(clickToken) attempt=\(index + 1)/\(recoveryDelays.count) delayMs=\(Int(delay * 1000)) bundle=\(expectedBundle) point=(\(Int(releasePoint.x)),\(Int(releasePoint.y)))")
             }
-            let releasePoint = self.neutralRecoveryPoint(from: location)
-            postSyntheticMouseUpPassthrough(at: releasePoint, flags: [])
-            Logger.debug("WORKFLOW: Posted neutral mouse-up recovery token=\(clickToken) bundle=\(expectedBundle) point=(\(Int(releasePoint.x)),\(Int(releasePoint.y)))")
         }
     }
 

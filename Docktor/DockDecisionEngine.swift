@@ -94,15 +94,65 @@ enum DockDecisionEngine {
     static func resolvedScrollDelta(pointDelta: Double,
                                     fixedDelta: Double,
                                     coarseDelta: Double,
+                                    appKitDelta: Double,
                                     isContinuous: Bool) -> Double {
-        // Continuous devices (trackpad/magic mouse) are best represented by point deltas.
-        // Discrete wheels should prefer coarse/fixed deltas because some per-device remappers
-        // only rewrite those fields (which can leave point delta sign stale).
-        let priority = isContinuous
-            ? [pointDelta, fixedDelta, coarseDelta]
-            : [coarseDelta, fixedDelta, pointDelta]
+        // Prefer AppKit's interpreted delta when available. It represents how regular macOS
+        // apps see the scroll event after system/device policy and upstream transforms.
+        if appKitDelta != 0 {
+            return appKitDelta
+        }
 
-        return priority.first(where: { $0 != 0 }) ?? 0
+        if isContinuous {
+            // Trackpad/magic mouse: point deltas are the most expressive signal.
+            return [pointDelta, fixedDelta, coarseDelta].first(where: { $0 != 0 }) ?? 0
+        }
+
+        // Discrete wheel devices can have remappers that rewrite only a subset of fields.
+        // If at least two fields agree on sign, follow that majority sign.
+        let fields = [pointDelta, fixedDelta, coarseDelta].filter { $0 != 0 }
+        let positiveCount = fields.filter { $0 > 0 }.count
+        let negativeCount = fields.filter { $0 < 0 }.count
+
+        if positiveCount >= 2 || negativeCount >= 2 {
+            let majorityPositive = positiveCount > negativeCount
+            let matching = fields.filter { majorityPositive ? ($0 > 0) : ($0 < 0) }
+            if let strongest = matching.max(by: { abs($0) < abs($1) }) {
+                return strongest
+            }
+        }
+
+        // Tie/unknown fallback: fixed-point, then coarse notch, then point.
+        return [fixedDelta, coarseDelta, pointDelta].first(where: { $0 != 0 }) ?? 0
+    }
+
+    private static let knownRemapperHints: [String] = [
+        "com.caldis.mos",
+        "com.lujjjh.linearmouse",
+        "linearmouse",
+        "mos",
+        "unnaturalscrollwheels",
+    ]
+
+    static func shouldInvertDiscreteScrollDirection(isContinuous: Bool,
+                                                    sourceBundleIdentifier: String?,
+                                                    knownRemapperRunning: Bool,
+                                                    userOverride: Bool) -> Bool {
+        guard !isContinuous else { return false }
+        if userOverride { return true }
+
+        if let source = sourceBundleIdentifier?.lowercased(),
+           knownRemapperHints.contains(where: { source.contains($0) }) {
+            return true
+        }
+
+        return knownRemapperRunning
+    }
+
+    static func effectiveScrollDelta(delta: Double,
+                                     isContinuous: Bool,
+                                     invertDiscreteDirection: Bool) -> Double {
+        guard !isContinuous, invertDiscreteDirection else { return delta }
+        return -delta
     }
 
     static func resolvedScrollDirection(delta: Double) -> DecisionScrollDirection {

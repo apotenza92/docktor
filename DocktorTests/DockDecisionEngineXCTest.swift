@@ -102,39 +102,131 @@ final class DockDecisionEngineXCTest: XCTestCase {
         )
     }
 
+    func testEffectiveScrollDeltaCanFlipDiscreteDirectionOnly() {
+        XCTAssertEqual(
+            DockDecisionEngine.effectiveScrollDelta(
+                delta: 3,
+                isContinuous: false,
+                invertDiscreteDirection: false
+            ),
+            3
+        )
+
+        XCTAssertEqual(
+            DockDecisionEngine.effectiveScrollDelta(
+                delta: 3,
+                isContinuous: false,
+                invertDiscreteDirection: true
+            ),
+            -3
+        )
+
+        XCTAssertEqual(
+            DockDecisionEngine.effectiveScrollDelta(
+                delta: 3,
+                isContinuous: true,
+                invertDiscreteDirection: true
+            ),
+            3
+        )
+    }
+
+    func testAutoDiscreteInvertHeuristic() {
+        XCTAssertFalse(
+            DockDecisionEngine.shouldInvertDiscreteScrollDirection(
+                isContinuous: true,
+                sourceBundleIdentifier: "com.caldis.Mos",
+                knownRemapperRunning: true,
+                userOverride: false
+            )
+        )
+
+        XCTAssertTrue(
+            DockDecisionEngine.shouldInvertDiscreteScrollDirection(
+                isContinuous: false,
+                sourceBundleIdentifier: nil,
+                knownRemapperRunning: false,
+                userOverride: true
+            )
+        )
+
+        XCTAssertTrue(
+            DockDecisionEngine.shouldInvertDiscreteScrollDirection(
+                isContinuous: false,
+                sourceBundleIdentifier: "com.caldis.Mos",
+                knownRemapperRunning: false,
+                userOverride: false
+            )
+        )
+
+        XCTAssertTrue(
+            DockDecisionEngine.shouldInvertDiscreteScrollDirection(
+                isContinuous: false,
+                sourceBundleIdentifier: nil,
+                knownRemapperRunning: true,
+                userOverride: false
+            )
+        )
+
+        XCTAssertFalse(
+            DockDecisionEngine.shouldInvertDiscreteScrollDirection(
+                isContinuous: false,
+                sourceBundleIdentifier: nil,
+                knownRemapperRunning: false,
+                userOverride: false
+            )
+        )
+    }
+
+    func testResolvedScrollDeltaPrefersAppKitInterpretedDeltaWhenAvailable() {
+        XCTAssertEqual(
+            DockDecisionEngine.resolvedScrollDelta(
+                pointDelta: -8,
+                fixedDelta: -1,
+                coarseDelta: 1,
+                appKitDelta: 6,
+                isContinuous: false
+            ),
+            6
+        )
+    }
+
     func testResolvedScrollDeltaPrefersPointForContinuousDevices() {
         XCTAssertEqual(
             DockDecisionEngine.resolvedScrollDelta(
                 pointDelta: -8,
                 fixedDelta: -1,
                 coarseDelta: 1,
+                appKitDelta: 0,
                 isContinuous: true
             ),
             -8
         )
     }
 
-    func testResolvedScrollDeltaPrefersCoarseForDiscreteWheelDevices() {
+    func testResolvedScrollDeltaUsesMajoritySignForDiscreteWheelConflicts() {
         XCTAssertEqual(
             DockDecisionEngine.resolvedScrollDelta(
-                pointDelta: -8,
-                fixedDelta: -1,
-                coarseDelta: 1,
+                pointDelta: 12,
+                fixedDelta: 1,
+                coarseDelta: -1,
+                appKitDelta: 0,
                 isContinuous: false
             ),
-            1
+            12
         )
     }
 
-    func testResolvedScrollDeltaFallsBackWhenPreferredFieldMissing() {
+    func testResolvedScrollDeltaFallsBackWhenNoMajorityForDiscreteWheel() {
         XCTAssertEqual(
             DockDecisionEngine.resolvedScrollDelta(
-                pointDelta: 0,
+                pointDelta: -8,
                 fixedDelta: 0,
-                coarseDelta: -1,
-                isContinuous: true
+                coarseDelta: 1,
+                appKitDelta: 0,
+                isContinuous: false
             ),
-            -1
+            1
         )
 
         XCTAssertEqual(
@@ -142,6 +234,7 @@ final class DockDecisionEngineXCTest: XCTestCase {
                 pointDelta: 0,
                 fixedDelta: 2,
                 coarseDelta: 0,
+                appKitDelta: 0,
                 isContinuous: false
             ),
             2

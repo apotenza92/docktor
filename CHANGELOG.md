@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.0.32]
+
+- Improved mixed-device scroll direction resolution by preferring AppKit-interpreted deltas (what apps actually receive) and adding conflict handling for disagreeing CGEvent scroll fields.
+- Added `scripts/automated_scroll_direction_checks.sh` for deterministic GUI-level scroll routing checks (discrete + continuous events on real Dock icon targets), and wired it into `scripts/run_all_checks.sh`.
+- Improved automatic mixed-device handling: discrete mouse-wheel routing now auto-inverts when remapper heuristics (e.g. Mos/LinearMouse/UnnaturalScrollWheels detection) indicate mouse-only direction remapping, while trackpad/Magic Mouse routing remains unchanged.
+- Fixed issue #1 follow-up: prevented delayed Dock context-menu popups after second-click `Minimize All` by using action-aware pressed-state recovery for consumed minimize clicks.
+
 ## [v0.0.31]
 
 - Refreshed automation reliability to prevent opaque "operation aborted" runs: shared preflight checks, dynamic Debug app discovery, deterministic app selection, and explicit startup/readiness health checks in `scripts/lib/test_common.sh`.

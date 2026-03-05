@@ -14,6 +14,7 @@ enum ClickPhase {
 final class DockClickEventTap {
     static let syntheticClickUserData: Int64 = 0xD0C0A11
     static let syntheticReleasePassthroughUserData: Int64 = 0xD0C0A12
+    private static let invertDiscreteScrollDirectionKey = "invertDiscreteScrollDirection"
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -35,6 +36,9 @@ final class DockClickEventTap {
     private let leftMouseDragThreshold: CGFloat = 6
     private var timeoutPassThroughUntilUptime: TimeInterval = 0
     private let timeoutPassThroughCooldown: TimeInterval = 0.18
+    private var cachedKnownRemapperRunning = false
+    private var lastKnownRemapperCheckUptime: TimeInterval = 0
+    private let remapperCheckInterval: TimeInterval = 1.0
 
     func start(
         clickHandler: @escaping (CGPoint, Int, CGEventFlags, ClickPhase) -> Bool,
@@ -137,6 +141,8 @@ final class DockClickEventTap {
         syntheticReleaseHandler = nil
         tapTimeoutHandler = nil
         timeoutPassThroughUntilUptime = 0
+        cachedKnownRemapperRunning = false
+        lastKnownRemapperCheckUptime = 0
         resetInteractionState()
     }
 
@@ -158,6 +164,33 @@ final class DockClickEventTap {
 
     private func isTimeoutPassThroughCooldownActive() -> Bool {
         ProcessInfo.processInfo.systemUptime < timeoutPassThroughUntilUptime
+    }
+
+    private func sourceBundleIdentifier(for event: CGEvent) -> String? {
+        let sourcePID = event.getIntegerValueField(.eventSourceUnixProcessID)
+        guard sourcePID > 0 else { return nil }
+        return NSRunningApplication(processIdentifier: pid_t(sourcePID))?.bundleIdentifier
+    }
+
+    private func knownRemapperRunning(nowUptime: TimeInterval) -> Bool {
+        if nowUptime - lastKnownRemapperCheckUptime < remapperCheckInterval {
+            return cachedKnownRemapperRunning
+        }
+
+        lastKnownRemapperCheckUptime = nowUptime
+        let apps = NSWorkspace.shared.runningApplications
+        cachedKnownRemapperRunning = apps.contains { app in
+            let bundle = app.bundleIdentifier?.lowercased() ?? ""
+            let name = app.localizedName?.lowercased() ?? ""
+            return bundle.contains("mos")
+                || bundle.contains("linearmouse")
+                || bundle.contains("unnaturalscrollwheels")
+                || name.contains("mos")
+                || name.contains("linearmouse")
+                || name.contains("unnaturalscrollwheels")
+        }
+
+        return cachedKnownRemapperRunning
     }
 
     private func didReceiveClick(event: CGEvent, phase: ClickPhase) -> Bool {
@@ -230,26 +263,41 @@ final class DockClickEventTap {
         
         let isContinuous = event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
 
+        let nsEvent = NSEvent(cgEvent: event)
+        let appKitDelta = nsEvent?.scrollingDeltaY ?? 0
+
         let pointDelta = event.getDoubleValueField(.scrollWheelEventPointDeltaAxis1) // pixel-ish for trackpads
         let fixedDelta = event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1) / 256.0 // convert 16.16 fixed to float
         let coarseDelta = event.getDoubleValueField(.scrollWheelEventDeltaAxis1) // wheel notch count
         let delta = DockDecisionEngine.resolvedScrollDelta(pointDelta: pointDelta,
                                                            fixedDelta: fixedDelta,
                                                            coarseDelta: coarseDelta,
+                                                           appKitDelta: appKitDelta,
                                                            isContinuous: isContinuous)
+        let sourceBundleIdentifier = sourceBundleIdentifier(for: event)
+        let nowUptime = ProcessInfo.processInfo.systemUptime
+        let userOverrideInvertDiscrete = UserDefaults.standard.bool(forKey: Self.invertDiscreteScrollDirectionKey)
+        let invertDiscreteDirection = DockDecisionEngine.shouldInvertDiscreteScrollDirection(
+            isContinuous: isContinuous,
+            sourceBundleIdentifier: sourceBundleIdentifier,
+            knownRemapperRunning: knownRemapperRunning(nowUptime: nowUptime),
+            userOverride: userOverrideInvertDiscrete
+        )
+        let effectiveDelta = DockDecisionEngine.effectiveScrollDelta(delta: delta,
+                                                                     isContinuous: isContinuous,
+                                                                     invertDiscreteDirection: invertDiscreteDirection)
         let scrollPhase = Int(event.getIntegerValueField(.scrollWheelEventScrollPhase))
         let momentumPhase = Int(event.getIntegerValueField(.scrollWheelEventMomentumPhase))
 
         if isContinuous {
             // Collapse trackpad/magic mouse scroll into a single logical gesture for action triggers.
             // We still decide whether to consume the whole gesture based on the first eligible event.
-            let now = ProcessInfo.processInfo.systemUptime
             let resetAfterSilence: TimeInterval = 0.25
-            if continuousScrollActive, now - lastContinuousScrollTime > resetAfterSilence {
+            if continuousScrollActive, nowUptime - lastContinuousScrollTime > resetAfterSilence {
                 continuousScrollActive = false
                 continuousScrollConsume = false
             }
-            lastContinuousScrollTime = now
+            lastContinuousScrollTime = nowUptime
 
             // New gesture start hint.
             let beganMask = 1 | 16 // began | mayBegin
@@ -270,18 +318,18 @@ final class DockClickEventTap {
         
         // Require a small threshold so accidental micro-movements are ignored, but single notches still count.
         let threshold = 0.2
-        if abs(delta) < threshold {
-            Logger.debug("DockClickEventTap: Scroll delta below threshold (\(delta)); ignoring")
+        if abs(effectiveDelta) < threshold {
+            Logger.debug("DockClickEventTap: Scroll delta below threshold (raw: \(delta), effective: \(effectiveDelta)); ignoring")
             return isContinuous ? continuousScrollConsume : false
         }
         
         // Route Up/Down by the effective delta sign for this event/device.
         // This respects per-device direction settings (trackpad vs mouse) and
         // third-party remappers (e.g. LinearMouse) that transform events upstream.
-        let resolvedDirection = DockDecisionEngine.resolvedScrollDirection(delta: delta)
+        let resolvedDirection = DockDecisionEngine.resolvedScrollDirection(delta: effectiveDelta)
         let direction: ScrollDirection = resolvedDirection == .up ? .up : .down
 
-        Logger.debug("DockClickEventTap: Raw scroll at \(location.x), \(location.y) (point: \(pointDelta), fixed: \(fixedDelta), coarse: \(coarseDelta), delta: \(delta), dir: \(direction == .up ? "up" : "down"), continuous: \(isContinuous))")
+        Logger.debug("DockClickEventTap: Raw scroll at \(location.x), \(location.y) (appKit: \(appKitDelta), point: \(pointDelta), fixed: \(fixedDelta), coarse: \(coarseDelta), sourceBundle: \(sourceBundleIdentifier ?? "nil"), remapperRunning: \(cachedKnownRemapperRunning), inverted: \(nsEvent?.isDirectionInvertedFromDevice ?? false), flipDiscrete: \(invertDiscreteDirection), rawDelta: \(delta), effectiveDelta: \(effectiveDelta), dir: \(direction == .up ? "up" : "down"), continuous: \(isContinuous))")
         let shouldConsume = scrollHandler?(location, direction, flags) ?? false
         Logger.debug("DockClickEventTap: Scroll consume=\(shouldConsume)")
 
