@@ -91,6 +91,24 @@ enum DockDecisionEngine {
         }
     }
 
+    static func shouldConsumeActiveClickAction(action: DecisionDockAction,
+                                               canRunAppExpose: Bool) -> Bool {
+        switch action {
+        case .none:
+            return false
+        case .activateApp,
+             .hideApp,
+             .minimizeAll,
+             .quitApp,
+             .bringAllToFront,
+             .hideOthers,
+             .singleAppMode:
+            return true
+        case .appExpose:
+            return canRunAppExpose
+        }
+    }
+
     static func resolvedScrollDelta(pointDelta: Double,
                                     fixedDelta: Double,
                                     coarseDelta: Double,

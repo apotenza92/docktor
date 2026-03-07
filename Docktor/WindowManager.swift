@@ -8,6 +8,19 @@ enum WindowManager {
         "AXSystemFloatingWindow",
         "AXUnknown"
     ]
+    private static let minimumCandidateWindowSize = CGSize(width: 100, height: 100)
+
+    private struct WindowCandidate {
+        let axWindow: AXUIElement
+        let cgWindowID: CGWindowID?
+        let bounds: CGRect?
+        let layer: Int?
+        let alpha: Double?
+        let isOnScreen: Bool
+        let subrole: String?
+        let spaceIDs: Set<Int>
+        let isMinimized: Bool
+    }
 
     /// Hide all windows of an app (Cmd+H equivalent)
     static func hideAllWindows(bundleIdentifier: String) -> Bool {
@@ -78,27 +91,24 @@ enum WindowManager {
         if app.isHidden {
             app.unhide()
         }
-        let windowsArray = appWindows(for: app)
+        let windowsArray = currentSpaceStandardWindows(for: app)
         guard !windowsArray.isEmpty else {
-            Logger.log("WindowManager: No windows to minimize for \(bundleIdentifier)")
+            Logger.log("WindowManager: No current-space standard windows to minimize for \(bundleIdentifier)")
             return false
         }
         
         var minimizedCount = 0
         for window in windowsArray {
-            var minimizedValue: CFTypeRef?
-            if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimizedValue) == .success,
-               let isMinimized = minimizedValue as? Bool, isMinimized {
+            if isWindowMinimized(window) {
                 continue // Already minimized
             }
             
-            let minimized: CFBoolean = kCFBooleanTrue
-            if AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, minimized) == .success {
+            if setWindowMinimized(window, minimized: true) {
                 minimizedCount += 1
             }
         }
         
-        Logger.log("WindowManager: Minimized \(minimizedCount) windows for \(bundleIdentifier)")
+        Logger.log("WindowManager: Minimized \(minimizedCount) current-space standard windows for \(bundleIdentifier)")
         return minimizedCount > 0
         
     }
@@ -110,25 +120,20 @@ enum WindowManager {
             return false
         }
         
-        let windowsArray = appWindows(for: app)
+        let windowsArray = currentSpaceStandardWindows(for: app)
         guard !windowsArray.isEmpty else {
-            Logger.log("WindowManager: No windows to restore for \(bundleIdentifier)")
+            Logger.log("WindowManager: No current-space standard windows to restore for \(bundleIdentifier)")
             return false
         }
         
         var restoredCount = 0
         for window in windowsArray {
-            var minimizedValue: CFTypeRef?
-            if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimizedValue) == .success,
-               let isMinimized = minimizedValue as? Bool, isMinimized {
-                let minimized: CFBoolean = kCFBooleanFalse
-                if AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, minimized) == .success {
-                    restoredCount += 1
-                }
+            if isWindowMinimized(window), setWindowMinimized(window, minimized: false) {
+                restoredCount += 1
             }
         }
         
-        Logger.log("WindowManager: Restored \(restoredCount) windows for \(bundleIdentifier)")
+        Logger.log("WindowManager: Restored \(restoredCount) current-space standard windows for \(bundleIdentifier)")
         
         guard restoredCount > 0 else { return false }
         
@@ -149,17 +154,13 @@ enum WindowManager {
             return false
         }
         
-        let windowsArray = appWindows(for: app)
+        let windowsArray = currentSpaceStandardWindows(for: app)
         guard !windowsArray.isEmpty else {
             return false
         }
         
         for window in windowsArray {
-            var minimizedValue: CFTypeRef?
-            if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimizedValue) == .success,
-               let isMinimized = minimizedValue as? Bool, isMinimized {
-                continue
-            } else {
+            if !isWindowMinimized(window) {
                 return false
             }
         }
@@ -172,15 +173,13 @@ enum WindowManager {
             return false
         }
         
-        let windowsArray = appWindows(for: app)
+        let windowsArray = currentSpaceStandardWindows(for: app)
         guard !windowsArray.isEmpty else {
             return false
         }
         
         for window in windowsArray {
-            var minimizedValue: CFTypeRef?
-            if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimizedValue) == .success,
-               let isMinimized = minimizedValue as? Bool, isMinimized {
+            if isWindowMinimized(window) {
                 continue // Skip minimized windows
             }
             
@@ -203,7 +202,7 @@ enum WindowManager {
             return 0
         }
 
-        return appWindows(for: app).count
+        return globalStandardWindows(for: app).count
     }
 
     /// True when the app currently reports at least two windows.
@@ -227,7 +226,7 @@ enum WindowManager {
               let windowRef = mainWindow,
               CFGetTypeID(windowRef) == AXUIElementGetTypeID() else {
             // Try getting first window if no main window
-            if let firstWindow = appWindows(for: app).first {
+            if let firstWindow = globalStandardWindows(for: app).first {
                 return firstWindow
             }
             return nil
@@ -293,12 +292,19 @@ enum WindowManager {
             return false
         }
         
-        let windows = appWindows(for: app)
+        let windows = currentSpaceStandardWindows(for: app)
         guard !windows.isEmpty else {
-            Logger.log("WindowManager: No windows to bring front for \(bundleIdentifier)")
+            Logger.log("WindowManager: No current-space standard windows to bring front for \(bundleIdentifier)")
             return false
         }
-        
+
+        var restoredCount = 0
+        for window in windows where isWindowMinimized(window) {
+            if setWindowMinimized(window, minimized: false) {
+                restoredCount += 1
+            }
+        }
+
         var raisedCount = 0
         for window in windows {
             if AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success {
@@ -308,8 +314,8 @@ enum WindowManager {
         
         _ = app.activate(options: [.activateIgnoringOtherApps])
         
-        Logger.log("WindowManager: Raised \(raisedCount) windows for \(bundleIdentifier)")
-        return raisedCount > 0
+        Logger.log("WindowManager: Raised \(raisedCount) current-space standard windows for \(bundleIdentifier) (restored=\(restoredCount))")
+        return raisedCount > 0 || restoredCount > 0
     }
     
     /// Hide all other apps except the provided bundle
@@ -418,28 +424,66 @@ enum WindowManager {
         return app.isHidden
     }
 
-    private static func appWindows(for app: NSRunningApplication) -> [AXUIElement] {
+    private static func rawAppWindows(for app: NSRunningApplication) -> [AXUIElement] {
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         var windowsRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
         guard result == .success, let rawWindows = windowsRef as? [AXUIElement] else {
             return []
         }
-
-        guard let bundleIdentifier = app.bundleIdentifier else {
-            return rawWindows
-        }
-        return rawWindows.filter { shouldIncludeWindow($0, bundleIdentifier: bundleIdentifier) }
+        return rawWindows
     }
 
-    private static func shouldIncludeWindow(_ window: AXUIElement, bundleIdentifier: String) -> Bool {
-        if let role = stringAttribute(window, attribute: kAXRoleAttribute as CFString),
-           role != (kAXWindowRole as String) {
+    private static func globalStandardWindows(for app: NSRunningApplication) -> [AXUIElement] {
+        rawAppWindows(for: app).filter { window in
+            shouldIncludeGlobalStandardWindow(window, bundleIdentifier: app.bundleIdentifier)
+        }
+    }
+
+    private static func currentSpaceStandardWindows(for app: NSRunningApplication) -> [AXUIElement] {
+        let activeSpaceIDs = currentActiveSpaceIDs()
+        return windowCandidates(for: app)
+            .filter { shouldIncludeCurrentSpaceStandardCandidate($0,
+                                                                 bundleIdentifier: app.bundleIdentifier,
+                                                                 activeSpaceIDs: activeSpaceIDs) }
+            .map(\.axWindow)
+    }
+
+    private static func windowCandidates(for app: NSRunningApplication) -> [WindowCandidate] {
+        let cgEntries = cgWindowEntries(for: app.processIdentifier)
+        var usedWindowIDs = Set<CGWindowID>()
+
+        return rawAppWindows(for: app).compactMap { window in
+            makeWindowCandidate(window,
+                                cgEntries: cgEntries,
+                                usedWindowIDs: &usedWindowIDs)
+        }
+    }
+
+    private static func shouldIncludeGlobalStandardCandidate(_ candidate: WindowCandidate,
+                                                             bundleIdentifier: String?) -> Bool {
+        guard shouldIncludeGlobalStandardWindow(candidate.axWindow, bundleIdentifier: bundleIdentifier) else {
             return false
         }
 
-        if bundleIdentifier == braveBundleIdentifier,
-           isLikelyBraveAuxiliaryWindow(window) {
+        guard passesGeneralCandidateValidation(candidate) else {
+            return false
+        }
+
+        return true
+    }
+
+    private static func shouldIncludeGlobalStandardWindow(_ window: AXUIElement,
+                                                          bundleIdentifier: String?) -> Bool {
+        guard roleIsWindow(window) else {
+            return false
+        }
+
+        guard isStandardSubrole(stringAttribute(window, attribute: kAXSubroleAttribute as CFString)) else {
+            return false
+        }
+
+        if bundleIdentifier == braveBundleIdentifier, isLikelyBraveAuxiliaryWindow(window) {
             let title = stringAttribute(window, attribute: kAXTitleAttribute as CFString) ?? "nil"
             let subrole = stringAttribute(window, attribute: kAXSubroleAttribute as CFString) ?? "nil"
             let identifier = stringAttribute(window, attribute: "AXIdentifier" as CFString) ?? "nil"
@@ -448,6 +492,24 @@ enum WindowManager {
         }
 
         return true
+    }
+
+    private static func shouldIncludeCurrentSpaceStandardCandidate(_ candidate: WindowCandidate,
+                                                                   bundleIdentifier: String?,
+                                                                   activeSpaceIDs: Set<Int>) -> Bool {
+        guard shouldIncludeGlobalStandardCandidate(candidate, bundleIdentifier: bundleIdentifier) else {
+            return false
+        }
+
+        guard let layer = candidate.layer, layer == 0 else {
+            return false
+        }
+
+        if !candidate.spaceIDs.isEmpty {
+            return !candidate.spaceIDs.isDisjoint(with: activeSpaceIDs)
+        }
+
+        return candidate.isOnScreen
     }
 
     private static func isLikelyBraveAuxiliaryWindow(_ window: AXUIElement) -> Bool {
@@ -475,6 +537,231 @@ enum WindowManager {
             hasElementAttribute(window, attribute: kAXMinimizeButtonAttribute as CFString) ||
             hasElementAttribute(window, attribute: kAXZoomButtonAttribute as CFString)
         return !hasTrafficLightControls
+    }
+
+    private static func roleIsWindow(_ window: AXUIElement) -> Bool {
+        guard let role = stringAttribute(window, attribute: kAXRoleAttribute as CFString) else {
+            return true
+        }
+        return role == (kAXWindowRole as String)
+    }
+
+    private static func isStandardSubrole(_ subrole: String?) -> Bool {
+        guard let subrole else {
+            return true
+        }
+        if subrole.isEmpty {
+            return true
+        }
+        return subrole == (kAXStandardWindowSubrole as String)
+    }
+
+    private static func passesGeneralCandidateValidation(_ candidate: WindowCandidate) -> Bool {
+        if let layer = candidate.layer, layer < 0 {
+            return false
+        }
+
+        if let alpha = candidate.alpha, alpha <= 0.01 {
+            return false
+        }
+
+        let size = candidate.bounds?.size ?? sizeAttribute(candidate.axWindow)
+        guard let size else {
+            return true
+        }
+
+        if size == .zero {
+            return false
+        }
+
+        return size.width >= minimumCandidateWindowSize.width
+            && size.height >= minimumCandidateWindowSize.height
+    }
+
+    private static func makeWindowCandidate(_ window: AXUIElement,
+                                            cgEntries: [[String: AnyObject]],
+                                            usedWindowIDs: inout Set<CGWindowID>) -> WindowCandidate? {
+        let resolvedWindowID = resolveCGWindowID(for: window,
+                                                 cgEntries: cgEntries,
+                                                 usedWindowIDs: &usedWindowIDs)
+        let matchingEntry = resolvedWindowID.flatMap { cgEntry(for: $0, in: cgEntries) }
+        let bounds = matchingEntry.flatMap(boundsFromCGEntry)
+        let layer = matchingEntry.flatMap { ($0[kCGWindowLayer as String] as? NSNumber)?.intValue }
+        let alpha = matchingEntry.flatMap { ($0[kCGWindowAlpha as String] as? NSNumber)?.doubleValue }
+        let isOnScreen = matchingEntry.flatMap { ($0[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue } ?? false
+        let subrole = stringAttribute(window, attribute: kAXSubroleAttribute as CFString)
+        let isMinimized = isWindowMinimized(window)
+        let spaceIDs = resolvedWindowID.map(WindowSpacePrivateApis.spaces(for:)) ?? []
+
+        return WindowCandidate(axWindow: window,
+                               cgWindowID: resolvedWindowID,
+                               bounds: bounds,
+                               layer: layer,
+                               alpha: alpha,
+                               isOnScreen: isOnScreen,
+                               subrole: subrole,
+                               spaceIDs: spaceIDs,
+                               isMinimized: isMinimized)
+    }
+
+    private static func cgWindowEntries(for pid: pid_t) -> [[String: AnyObject]] {
+        let rawEntries = CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: AnyObject]] ?? []
+        return rawEntries.filter { entry in
+            let ownerPID = (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? 0
+            return ownerPID == pid
+        }
+    }
+
+    private static func currentActiveSpaceIDs() -> Set<Int> {
+        let entries = CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: AnyObject]] ?? []
+        var activeSpaceIDs = Set<Int>()
+
+        for entry in entries {
+            let layer = (entry[kCGWindowLayer as String] as? NSNumber)?.intValue ?? -1
+            let isOnScreen = (entry[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? false
+            guard layer == 0, isOnScreen else {
+                continue
+            }
+
+            let windowID = CGWindowID((entry[kCGWindowNumber as String] as? NSNumber)?.uint32Value ?? 0)
+            guard windowID != 0 else {
+                continue
+            }
+
+            activeSpaceIDs.formUnion(WindowSpacePrivateApis.spaces(for: windowID))
+        }
+
+        return activeSpaceIDs
+    }
+
+    private static func resolveCGWindowID(for window: AXUIElement,
+                                          cgEntries: [[String: AnyObject]],
+                                          usedWindowIDs: inout Set<CGWindowID>) -> CGWindowID? {
+        if let directWindowID = WindowSpacePrivateApis.windowID(for: window), directWindowID != 0 {
+            usedWindowIDs.insert(directWindowID)
+            return directWindowID
+        }
+
+        let fallbackWindowID = mapAXWindowToCGWindowID(window,
+                                                       cgEntries: cgEntries,
+                                                       excluding: usedWindowIDs)
+        if let fallbackWindowID {
+            usedWindowIDs.insert(fallbackWindowID)
+        }
+        return fallbackWindowID
+    }
+
+    private static func mapAXWindowToCGWindowID(_ window: AXUIElement,
+                                                cgEntries: [[String: AnyObject]],
+                                                excluding usedWindowIDs: Set<CGWindowID>) -> CGWindowID? {
+        let axTitle = (stringAttribute(window, attribute: kAXTitleAttribute as CFString) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let axPosition = pointAttribute(window, attribute: kAXPositionAttribute as CFString)
+        let axSize = sizeAttribute(window)
+        let tolerance: CGFloat = 2.0
+
+        if !axTitle.isEmpty,
+           let titleMatch = cgEntries.first(where: { entry in
+               let candidateTitle = ((entry[kCGWindowName as String] as? String) ?? "")
+                   .trimmingCharacters(in: .whitespacesAndNewlines)
+               let candidateID = CGWindowID((entry[kCGWindowNumber as String] as? NSNumber)?.uint32Value ?? 0)
+               return !usedWindowIDs.contains(candidateID) && candidateTitle == axTitle
+           }) {
+            return CGWindowID((titleMatch[kCGWindowNumber as String] as? NSNumber)?.uint32Value ?? 0)
+        }
+
+        if let axPosition, let axSize, axSize != .zero,
+           let boundsMatch = cgEntries.first(where: { entry in
+               let candidateID = CGWindowID((entry[kCGWindowNumber as String] as? NSNumber)?.uint32Value ?? 0)
+               guard !usedWindowIDs.contains(candidateID),
+                     let candidateBounds = boundsFromCGEntry(entry) else {
+                   return false
+               }
+               let positionMatch = abs(candidateBounds.origin.x - axPosition.x) <= tolerance
+                   && abs(candidateBounds.origin.y - axPosition.y) <= tolerance
+               let sizeMatch = abs(candidateBounds.size.width - axSize.width) <= tolerance
+                   && abs(candidateBounds.size.height - axSize.height) <= tolerance
+               return positionMatch && sizeMatch
+           }) {
+            return CGWindowID((boundsMatch[kCGWindowNumber as String] as? NSNumber)?.uint32Value ?? 0)
+        }
+
+        if !axTitle.isEmpty,
+           let fuzzyMatch = cgEntries.first(where: { entry in
+               let candidateID = CGWindowID((entry[kCGWindowNumber as String] as? NSNumber)?.uint32Value ?? 0)
+               guard !usedWindowIDs.contains(candidateID) else {
+                   return false
+               }
+               let candidateTitle = ((entry[kCGWindowName as String] as? String) ?? "").lowercased()
+               return candidateTitle.contains(axTitle.lowercased())
+           }) {
+            return CGWindowID((fuzzyMatch[kCGWindowNumber as String] as? NSNumber)?.uint32Value ?? 0)
+        }
+
+        return nil
+    }
+
+    private static func cgEntry(for windowID: CGWindowID,
+                                in cgEntries: [[String: AnyObject]]) -> [String: AnyObject]? {
+        cgEntries.first { entry in
+            let candidateID = CGWindowID((entry[kCGWindowNumber as String] as? NSNumber)?.uint32Value ?? 0)
+            return candidateID == windowID
+        }
+    }
+
+    nonisolated private static func boundsFromCGEntry(_ entry: [String: AnyObject]) -> CGRect? {
+        guard let bounds = entry[kCGWindowBounds as String] as? [String: AnyObject] else {
+            return nil
+        }
+
+        let x = CGFloat((bounds["X"] as? NSNumber)?.doubleValue ?? .nan)
+        let y = CGFloat((bounds["Y"] as? NSNumber)?.doubleValue ?? .nan)
+        let width = CGFloat((bounds["Width"] as? NSNumber)?.doubleValue ?? .nan)
+        let height = CGFloat((bounds["Height"] as? NSNumber)?.doubleValue ?? .nan)
+        guard x.isFinite, y.isFinite, width.isFinite, height.isFinite else {
+            return nil
+        }
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    private static func isWindowMinimized(_ window: AXUIElement) -> Bool {
+        var minimizedValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimizedValue) == .success,
+              let isMinimized = minimizedValue as? Bool else {
+            return false
+        }
+        return isMinimized
+    }
+
+    private static func setWindowMinimized(_ window: AXUIElement, minimized: Bool) -> Bool {
+        let value: CFBoolean = minimized ? kCFBooleanTrue : kCFBooleanFalse
+        return AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, value) == .success
+    }
+
+    private static func pointAttribute(_ element: AXUIElement, attribute: CFString) -> CGPoint? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+              let axValue = value,
+              CFGetTypeID(axValue) == AXValueGetTypeID(),
+              AXValueGetType(axValue as! AXValue) == .cgPoint else {
+            return nil
+        }
+
+        var point = CGPoint.zero
+        return AXValueGetValue(axValue as! AXValue, .cgPoint, &point) ? point : nil
+    }
+
+    private static func sizeAttribute(_ element: AXUIElement) -> CGSize? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &value) == .success,
+              let axValue = value,
+              CFGetTypeID(axValue) == AXValueGetTypeID(),
+              AXValueGetType(axValue as! AXValue) == .cgSize else {
+            return nil
+        }
+
+        var size = CGSize.zero
+        return AXValueGetValue(axValue as! AXValue, .cgSize, &size) ? size : nil
     }
 
     private static func stringAttribute(_ element: AXUIElement, attribute: CFString) -> String? {

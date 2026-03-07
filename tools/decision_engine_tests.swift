@@ -156,6 +156,87 @@ func runDecisionEngineTests() {
         "modifier action should pass through when app not running"
     )
 
+    // shouldConsumeActiveClickAction
+    expect(
+        DockDecisionEngine.shouldConsumeActiveClickAction(
+            action: .none,
+            canRunAppExpose: true
+        ) == false,
+        "active click none should pass through"
+    )
+
+    expect(
+        DockDecisionEngine.shouldConsumeActiveClickAction(
+            action: .hideApp,
+            canRunAppExpose: true
+        ) == true,
+        "active click hideApp should consume"
+    )
+
+    expect(
+        DockDecisionEngine.shouldConsumeActiveClickAction(
+            action: .activateApp,
+            canRunAppExpose: true
+        ) == true,
+        "active click activateApp should consume"
+    )
+
+    expect(
+        DockDecisionEngine.shouldConsumeActiveClickAction(
+            action: .bringAllToFront,
+            canRunAppExpose: true
+        ) == true,
+        "active click bringAllToFront should consume"
+    )
+
+    expect(
+        DockDecisionEngine.shouldConsumeActiveClickAction(
+            action: .hideOthers,
+            canRunAppExpose: true
+        ) == true,
+        "active click hideOthers should consume"
+    )
+
+    expect(
+        DockDecisionEngine.shouldConsumeActiveClickAction(
+            action: .appExpose,
+            canRunAppExpose: true
+        ) == true,
+        "active click appExpose should consume when runnable"
+    )
+
+    expect(
+        DockDecisionEngine.shouldConsumeActiveClickAction(
+            action: .appExpose,
+            canRunAppExpose: false
+        ) == false,
+        "active click appExpose should pass through when not runnable"
+    )
+
+    expect(
+        DockDecisionEngine.shouldConsumeActiveClickAction(
+            action: .singleAppMode,
+            canRunAppExpose: true
+        ) == true,
+        "active click singleAppMode should consume"
+    )
+
+    expect(
+        DockDecisionEngine.shouldConsumeActiveClickAction(
+            action: .minimizeAll,
+            canRunAppExpose: true
+        ) == true,
+        "active click minimizeAll should consume"
+    )
+
+    expect(
+        DockDecisionEngine.shouldConsumeActiveClickAction(
+            action: .quitApp,
+            canRunAppExpose: true
+        ) == true,
+        "active click quitApp should consume"
+    )
+
     print("Decision engine tests passed")
 }
 

@@ -102,6 +102,78 @@ final class DockDecisionEngineXCTest: XCTestCase {
         )
     }
 
+    func testActiveClickConsumeBehavior() {
+        XCTAssertFalse(
+            DockDecisionEngine.shouldConsumeActiveClickAction(
+                action: .none,
+                canRunAppExpose: true
+            )
+        )
+
+        XCTAssertTrue(
+            DockDecisionEngine.shouldConsumeActiveClickAction(
+                action: .hideApp,
+                canRunAppExpose: true
+            )
+        )
+
+        XCTAssertTrue(
+            DockDecisionEngine.shouldConsumeActiveClickAction(
+                action: .activateApp,
+                canRunAppExpose: true
+            )
+        )
+
+        XCTAssertTrue(
+            DockDecisionEngine.shouldConsumeActiveClickAction(
+                action: .bringAllToFront,
+                canRunAppExpose: true
+            )
+        )
+
+        XCTAssertTrue(
+            DockDecisionEngine.shouldConsumeActiveClickAction(
+                action: .hideOthers,
+                canRunAppExpose: true
+            )
+        )
+
+        XCTAssertTrue(
+            DockDecisionEngine.shouldConsumeActiveClickAction(
+                action: .appExpose,
+                canRunAppExpose: true
+            )
+        )
+
+        XCTAssertFalse(
+            DockDecisionEngine.shouldConsumeActiveClickAction(
+                action: .appExpose,
+                canRunAppExpose: false
+            )
+        )
+
+        XCTAssertTrue(
+            DockDecisionEngine.shouldConsumeActiveClickAction(
+                action: .singleAppMode,
+                canRunAppExpose: true
+            )
+        )
+
+        XCTAssertTrue(
+            DockDecisionEngine.shouldConsumeActiveClickAction(
+                action: .minimizeAll,
+                canRunAppExpose: true
+            )
+        )
+
+        XCTAssertTrue(
+            DockDecisionEngine.shouldConsumeActiveClickAction(
+                action: .quitApp,
+                canRunAppExpose: true
+            )
+        )
+    }
+
     func testEffectiveScrollDeltaCanFlipDiscreteDirectionOnly() {
         XCTAssertEqual(
             DockDecisionEngine.effectiveScrollDelta(

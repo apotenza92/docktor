@@ -89,6 +89,8 @@ echo "[settings-shell] --settings fail-safe"
 write_pref_bool showMenuBarIcon false
 write_pref_bool showOnStartup false
 start_docktor /tmp/docktor-settings-shell-args.log --settings
+wait_for_log_contains "Launch argument requested settings window" /tmp/docktor-settings-shell-args.log 6 || true
+wait_for_log_contains "Opening settings window" /tmp/docktor-settings-shell-args.log 6 || true
 stop_docktor
 if ! log_contains "Launch argument requested settings window" /tmp/docktor-settings-shell-args.log; then
   echo "  FAIL: missing launch-argument settings log"

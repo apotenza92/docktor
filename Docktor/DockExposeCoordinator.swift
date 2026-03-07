@@ -22,6 +22,7 @@ final class DockExposeCoordinator: ObservableObject {
     private let scrollToggleCooldown: TimeInterval = 0.7
     private var lastMinimizeToggleTime: [String: TimeInterval] = [:]
     private let minimizeToggleCooldown: TimeInterval = 1.0
+    private var lastHideOthersTargetBundle: String?
     private var pendingClickContext: PendingClickContext?
     private var pendingClickWasDragged = false
     private var appExposeInvocationToken: UUID?
@@ -512,9 +513,9 @@ final class DockExposeCoordinator: ObservableObject {
 
     private func shouldRecoverDockPressedState(after action: DockAction?) -> Bool {
         guard let action else { return false }
-        // App Exposé clicks are pass-through and should never require recovery.
-        // Hide App consumes the click itself; a synthetic release would cause the Dock to re-activate the app.
-        return action != .appExpose && action != .hideApp
+        // Hide App and Quit App should not receive a synthetic release.
+        // For Hide App it can re-activate the app; for Quit App it can relaunch it from the Dock.
+        return action != .hideApp && action != .quitApp
     }
 
     private func scheduleDockPressedStateRecovery(at location: CGPoint,
@@ -522,6 +523,11 @@ final class DockExposeCoordinator: ObservableObject {
                                                   clickToken: UInt64,
                                                   action: DockAction?) {
         var recoveryDelays: [TimeInterval] = [0.008]
+        if action == .appExpose {
+            // App Exposé needs a later release pulse. An immediate release can collapse the just-opened
+            // Exposé state, while a delayed pulse still clears the Dock's pressed icon.
+            recoveryDelays = [0.28]
+        }
         if action == .minimizeAll {
             // Minimize can reshuffle Dock state quickly; a second release pulse avoids
             // occasional long-press/context-menu fallthrough when the first release races.
@@ -733,10 +739,12 @@ final class DockExposeCoordinator: ObservableObject {
             }
             Logger.debug("WORKFLOW: App Exposé trigger from click")
             triggerAppExpose(for: clickedBundle)
-            // Never consume App Exposé clicks; let Dock see the full click lifecycle.
-            return false
+            // Consume active-app App Exposé clicks so Dock cannot switch Spaces/windows underneath us.
+            return true
         case .singleAppMode:
-            performSingleAppMode(targetBundleIdentifier: clickedBundle, frontmostBefore: frontmostBefore)
+            performSingleAppMode(targetBundleIdentifier: clickedBundle,
+                                 frontmostBefore: frontmostBefore,
+                                 allowTargetToggleOff: false)
             return true
         case .minimizeAll:
             if shouldThrottleMinimize(bundleIdentifier: clickedBundle) {
@@ -744,13 +752,7 @@ final class DockExposeCoordinator: ObservableObject {
                 return true
             }
             markMinimize(bundleIdentifier: clickedBundle)
-            if WindowManager.allWindowsMinimized(bundleIdentifier: clickedBundle) {
-                if WindowManager.restoreAllWindows(bundleIdentifier: clickedBundle) {
-                    _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: clickedBundle)
-                }
-            } else {
-                _ = WindowManager.minimizeAllWindows(bundleIdentifier: clickedBundle)
-            }
+            performMinimizeToggle(bundleIdentifier: clickedBundle)
             return true
         case .quitApp:
             _ = WindowManager.quitApp(bundleIdentifier: clickedBundle)
@@ -862,13 +864,7 @@ final class DockExposeCoordinator: ObservableObject {
                 return true
             }
             markMinimize(bundleIdentifier: clickedBundle)
-            if WindowManager.allWindowsMinimized(bundleIdentifier: clickedBundle) {
-                if WindowManager.restoreAllWindows(bundleIdentifier: clickedBundle) {
-                    _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: clickedBundle)
-                }
-            } else {
-                _ = WindowManager.minimizeAllWindows(bundleIdentifier: clickedBundle)
-            }
+            performMinimizeToggle(bundleIdentifier: clickedBundle)
             return true
         case .quitApp:
             _ = WindowManager.quitApp(bundleIdentifier: clickedBundle)
@@ -1141,13 +1137,7 @@ final class DockExposeCoordinator: ObservableObject {
                 return true
             }
             markMinimize(bundleIdentifier: bundleIdentifier)
-            if WindowManager.allWindowsMinimized(bundleIdentifier: bundleIdentifier) {
-                if WindowManager.restoreAllWindows(bundleIdentifier: bundleIdentifier) {
-                    _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: bundleIdentifier)
-                }
-            } else {
-                _ = WindowManager.minimizeAllWindows(bundleIdentifier: bundleIdentifier)
-            }
+            performMinimizeToggle(bundleIdentifier: bundleIdentifier)
             return true
         case .quitApp:
             _ = WindowManager.quitApp(bundleIdentifier: bundleIdentifier)
@@ -1273,7 +1263,13 @@ final class DockExposeCoordinator: ObservableObject {
                 return false
             }
             let action = configuredAction(for: .click, flags: flags)
-            return action != .none && action != .appExpose
+            if action == .appExpose {
+                return shouldConsumeActiveClickAppExpose(for: clickedBundle, flags: flags)
+            }
+            return DockDecisionEngine.shouldConsumeActiveClickAction(
+                action: decisionAction(from: action),
+                canRunAppExpose: true
+            )
         }
 
         if shouldPromotePostExposeDismissClickToFirstClick(bundleIdentifier: clickedBundle,
@@ -1283,7 +1279,13 @@ final class DockExposeCoordinator: ObservableObject {
         }
 
         let action = configuredAction(for: .click, flags: flags)
-        return action != .none && action != .appExpose
+        if action == .appExpose {
+            return shouldConsumeActiveClickAppExpose(for: clickedBundle, flags: flags)
+        }
+        return DockDecisionEngine.shouldConsumeActiveClickAction(
+            action: decisionAction(from: action),
+            canRunAppExpose: true
+        )
     }
 
     private func shouldForceFirstClickActivateFallback(for context: PendingClickContext) -> Bool {
@@ -1420,6 +1422,24 @@ final class DockExposeCoordinator: ObservableObject {
         return shouldRun
     }
 
+    private func shouldConsumeActiveClickAppExpose(for bundleIdentifier: String,
+                                                   flags: CGEventFlags) -> Bool {
+        let windowCount = WindowManager.totalWindowCount(bundleIdentifier: bundleIdentifier)
+        guard windowCount > 0 else { return false }
+
+        let clickModifier = modifierCombination(from: flags)
+        let clickSlot = appExposeSlotKey(for: .click, modifier: clickModifier)
+        let requiresMultipleWindows = clickModifier == .none
+            ? preferences.clickAppExposeRequiresMultipleWindows
+            : preferences.appExposeMultipleWindowsRequired(slot: clickSlot)
+
+        let canRunAppExpose = !requiresMultipleWindows || windowCount >= 2
+        return DockDecisionEngine.shouldConsumeActiveClickAction(
+            action: .appExpose,
+            canRunAppExpose: canRunAppExpose
+        )
+    }
+
     private func performActivateAppAction(bundleIdentifier: String) -> Bool {
         let isRunning = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundleIdentifier }
         if !isRunning {
@@ -1438,10 +1458,10 @@ final class DockExposeCoordinator: ObservableObject {
     }
 
     private func performHideAppToggle(targetBundleIdentifier: String) -> Bool {
-        // Redoing Hide App should undo hidden state globally (show all).
-        if WindowManager.isAppHidden(bundleIdentifier: targetBundleIdentifier)
-            || WindowManager.anyHiddenOthers(excluding: targetBundleIdentifier) {
+        // Hide App should toggle based on the target app's own visibility, not unrelated hidden apps.
+        if WindowManager.isAppHidden(bundleIdentifier: targetBundleIdentifier) {
             _ = WindowManager.showAllApplications()
+            lastHideOthersTargetBundle = nil
         } else {
             _ = WindowManager.hideAllWindows(bundleIdentifier: targetBundleIdentifier)
         }
@@ -1450,18 +1470,23 @@ final class DockExposeCoordinator: ObservableObject {
     }
 
     private func performHideOthersToggle(targetBundleIdentifier: String) -> Bool {
-        // Redoing Hide Others should always undo by showing all apps.
-        if WindowManager.isAppHidden(bundleIdentifier: targetBundleIdentifier)
-            || WindowManager.anyHiddenOthers(excluding: targetBundleIdentifier) {
+        let shouldUndoHideOthers = lastHideOthersTargetBundle == targetBundleIdentifier
+            && WindowManager.anyHiddenOthers(excluding: targetBundleIdentifier)
+
+        if shouldUndoHideOthers {
             _ = WindowManager.showAllApplications()
+            lastHideOthersTargetBundle = nil
         } else {
             _ = WindowManager.hideOthers(bundleIdentifier: targetBundleIdentifier)
+            lastHideOthersTargetBundle = targetBundleIdentifier
         }
         resetExposeTracking()
         return true
     }
 
-    private func performSingleAppMode(targetBundleIdentifier: String, frontmostBefore: String?) {
+    private func performSingleAppMode(targetBundleIdentifier: String,
+                                      frontmostBefore: String?,
+                                      allowTargetToggleOff: Bool = true) {
         let frontmostNow = FrontmostAppTracker.frontmostBundleIdentifier()
         let sourceBundleToHide = [frontmostBefore, frontmostNow]
             .compactMap { $0 }
@@ -1471,7 +1496,7 @@ final class DockExposeCoordinator: ObservableObject {
 
         if let sourceBundleToHide {
             _ = WindowManager.hideAllWindows(bundleIdentifier: sourceBundleToHide)
-        } else if frontmostBefore == targetBundleIdentifier || frontmostNow == targetBundleIdentifier {
+        } else if allowTargetToggleOff && (frontmostBefore == targetBundleIdentifier || frontmostNow == targetBundleIdentifier) {
             // Toggle-off behavior when the user targets the current app.
             _ = WindowManager.hideAllWindows(bundleIdentifier: targetBundleIdentifier)
             resetExposeTracking()
@@ -1489,6 +1514,14 @@ final class DockExposeCoordinator: ObservableObject {
         }
 
         resetExposeTracking()
+    }
+
+    private func performMinimizeToggle(bundleIdentifier: String) {
+        if WindowManager.restoreAllWindows(bundleIdentifier: bundleIdentifier) {
+            _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: bundleIdentifier)
+        } else {
+            _ = WindowManager.minimizeAllWindows(bundleIdentifier: bundleIdentifier)
+        }
     }
     
     private func shouldThrottleScrollToggle(action: DockAction,

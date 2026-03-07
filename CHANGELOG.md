@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.0.34]
+
+- Added Space-aware AX/CG window filtering for window actions, including private window-to-Space lookup and stronger AX-to-CG window identity matching for current-Space `Minimize All` and `Bring All to Front`.
+- Fixed active-app second-click consistency for `Hide App`, `Hide Others`, `Minimize All`, and `Quit App`, including preventing Dock release recovery from relaunching apps after `Quit App`.
+- Hardened the local regression harnesses for settings and multi-Space Brave checks so release validation covers the new active-app and cross-Space behavior more reliably.
+
 ## [v0.0.33]
 
 - Fixed the menu bar icon rendering path to redraw as a template image per display scale, so the glyph stays sharp when moving between non-Retina external displays and Retina MacBook panels.
