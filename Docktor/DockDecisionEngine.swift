@@ -105,7 +105,26 @@ enum DockDecisionEngine {
              .singleAppMode:
             return true
         case .appExpose:
-            return canRunAppExpose
+            _ = canRunAppExpose
+            return false
+        }
+    }
+
+    static func shouldRecoverDockPressedState(after action: DecisionDockAction) -> Bool {
+        switch action {
+        case .none:
+            return false
+        case .appExpose:
+            return false
+        case .hideApp,
+             .quitApp:
+            return false
+        case .activateApp,
+             .minimizeAll,
+             .bringAllToFront,
+             .hideOthers,
+             .singleAppMode:
+            return true
         }
     }
 

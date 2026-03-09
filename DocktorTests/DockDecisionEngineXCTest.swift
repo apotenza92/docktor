@@ -138,17 +138,17 @@ final class DockDecisionEngineXCTest: XCTestCase {
             )
         )
 
-        XCTAssertTrue(
-            DockDecisionEngine.shouldConsumeActiveClickAction(
-                action: .appExpose,
-                canRunAppExpose: true
-            )
-        )
-
         XCTAssertFalse(
             DockDecisionEngine.shouldConsumeActiveClickAction(
                 action: .appExpose,
                 canRunAppExpose: false
+            )
+        )
+        
+        XCTAssertFalse(
+            DockDecisionEngine.shouldConsumeActiveClickAction(
+                action: .appExpose,
+                canRunAppExpose: true
             )
         )
 
@@ -171,6 +171,28 @@ final class DockDecisionEngineXCTest: XCTestCase {
                 action: .quitApp,
                 canRunAppExpose: true
             )
+        )
+    }
+
+    func testDockPressedStateRecoveryRules() {
+        XCTAssertFalse(
+            DockDecisionEngine.shouldRecoverDockPressedState(after: .none)
+        )
+
+        XCTAssertFalse(
+            DockDecisionEngine.shouldRecoverDockPressedState(after: .appExpose)
+        )
+
+        XCTAssertFalse(
+            DockDecisionEngine.shouldRecoverDockPressedState(after: .hideApp)
+        )
+
+        XCTAssertFalse(
+            DockDecisionEngine.shouldRecoverDockPressedState(after: .quitApp)
+        )
+
+        XCTAssertTrue(
+            DockDecisionEngine.shouldRecoverDockPressedState(after: .minimizeAll)
         )
     }
 

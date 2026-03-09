@@ -9,6 +9,7 @@ final class DockExposeCoordinator: ObservableObject {
     private let eventTap = DockClickEventTap()
     private let invoker = AppExposeInvoker()
     private let preferences: Preferences
+    private var workspaceActivationObserver: NSObjectProtocol?
     private var permissionPollTask: Task<Void, Never>?
     private var lastTriggeredBundle: String? // Track which app we last triggered Exposé for - ignore clicks on same app until different app is clicked
     private var currentExposeApp: String? // Track which app's windows are currently being shown in App Exposé (can differ from lastTriggeredBundle)
@@ -29,10 +30,27 @@ final class DockExposeCoordinator: ObservableObject {
     private var clickRecoveryTokenCounter: UInt64 = 0
     private var clickSequenceCounter: UInt64 = 0
     private var activationAssertionTokenCounter: UInt64 = 0
+    private var exposeTrackingExpiryTokenCounter: UInt64 = 0
+    private var deferredActiveAppExposeClickSequence: UInt64?
+    private var pendingDockClickWatchdogTokenCounter: UInt64 = 0
     private let appExposeDismissGraceWindow: TimeInterval = 0.02
+    private let exposeTrackingExpiryWindow: TimeInterval = 0.9
 
     init(preferences: Preferences) {
         self.preferences = preferences
+        workspaceActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleWorkspaceActivation(notification)
+        }
+    }
+
+    deinit {
+        if let workspaceActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(workspaceActivationObserver)
+        }
     }
 
     @Published private(set) var isRunning = false
@@ -66,6 +84,11 @@ final class DockExposeCoordinator: ObservableObject {
         let windowCountAtMouseDown: Int?
         let consumeClick: Bool
         let forceFirstClickActivateFallback: Bool
+    }
+
+    private struct DeferredAppExposeContext {
+        let source: String
+        let origin: CGPoint?
     }
 
     var isAppExposeShortcutConfigured: Bool {
@@ -392,7 +415,20 @@ final class DockExposeCoordinator: ObservableObject {
                 }
                 pendingClickContext = nil
                 pendingClickWasDragged = false
+                deferredActiveAppExposeClickSequence = nil
                 return false
+            }
+
+            if let staleContext = pendingClickContext {
+                let recoveryPoint = DockHitTest.neutralBackgroundPoint(near: staleContext.location)
+                    ?? DockHitTest.neutralBackgroundPoint(near: location)
+                    ?? location
+                pendingClickContext = nil
+                pendingClickWasDragged = false
+                deferredActiveAppExposeClickSequence = nil
+                clickRecoveryTokenCounter += 1
+                postSyntheticMouseUpPassthrough(at: recoveryPoint, flags: [])
+                Logger.debug("WORKFLOW: Recovered stale pending Dock click priorClick=\(staleContext.clickSequence) newBundle=\(clickedBundle) recoveryPoint=(\(Int(recoveryPoint.x)),\(Int(recoveryPoint.y)))")
             }
 
             if diagnosticsCaptureActive {
@@ -431,6 +467,19 @@ final class DockExposeCoordinator: ObservableObject {
                                                      windowCountAtMouseDown: context.windowCountAtMouseDown,
                                                      consumeClick: consumeClick,
                                                      forceFirstClickActivateFallback: forceFirstClickActivateFallback)
+            if shouldSchedulePendingDockClickWatchdog(for: pendingClickContext!) {
+                pendingDockClickWatchdogTokenCounter += 1
+                schedulePendingDockClickWatchdog(context: pendingClickContext!,
+                                                 watchdogToken: pendingDockClickWatchdogTokenCounter)
+            }
+            if shouldTriggerDeferredActiveAppExposeOnMouseDown(for: pendingClickContext!) {
+                deferredActiveAppExposeClickSequence = clickSequence
+                Logger.debug("WORKFLOW: Scheduling deferred App Exposé from mouse-down click=\(clickSequence) bundle=\(clickedBundle)")
+                scheduleDeferredAppExposeTrigger(for: clickedBundle,
+                                                source: "activeClickMouseDown",
+                                                origin: location)
+                scheduleDeferredActiveAppExposePendingClickCleanup(clickSequence: clickSequence)
+            }
             Logger.debug("APP_EXPOSE_TRACE: click=\(clickSequence) phase=down bundle=\(clickedBundle) frontmostBefore=\(frontmostBefore ?? "nil") runningAtDown=\(isRunningAtDown) windowsAtDown=\(windowCountAtMouseDown.map(String.init) ?? "nil") modifier=\(modifierCombination(from: flags).rawValue) firstClickBehavior=\(preferences.firstClickBehavior.rawValue) consumePlanned=\(consumeClick) fallbackLatched=\(forceFirstClickActivateFallback)")
             pendingClickWasDragged = false
             // Never consume mouse-down. Dock needs it to begin drag-reorder interactions.
@@ -492,6 +541,11 @@ final class DockExposeCoordinator: ObservableObject {
             }
 
             Logger.debug("APP_EXPOSE_TRACE: click=\(effectiveContext.clickSequence) phase=up bundle=\(effectiveContext.clickedBundle) frontmostBefore=\(effectiveContext.frontmostBefore ?? "nil") windowsAtDown=\(effectiveContext.windowCountAtMouseDown.map(String.init) ?? "nil") consumePlanned=\(effectiveContext.consumeClick) fallbackLatched=\(effectiveContext.forceFirstClickActivateFallback)")
+            if deferredActiveAppExposeClickSequence == effectiveContext.clickSequence {
+                Logger.debug("WORKFLOW: Skipping mouse-up execution for deferred active-app App Exposé click=\(effectiveContext.clickSequence)")
+                deferredActiveAppExposeClickSequence = nil
+                return false
+            }
             let consumeNow = executeClickAction(effectiveContext)
             if consumeNow != context.consumeClick {
                 Logger.debug("WORKFLOW: Click consume mismatch click=\(context.clickSequence) planned=\(context.consumeClick) actual=\(consumeNow)")
@@ -513,10 +567,7 @@ final class DockExposeCoordinator: ObservableObject {
 
     private func shouldRecoverDockPressedState(after action: DockAction?) -> Bool {
         guard let action else { return false }
-        // Hide App, App Exposé, and Quit App should not receive a synthetic release.
-        // For Hide App it can re-activate the app; for App Exposé it can immediately collapse
-        // the transition; for Quit App it can relaunch the app from the Dock.
-        return action != .hideApp && action != .appExpose && action != .quitApp
+        return DockDecisionEngine.shouldRecoverDockPressedState(after: decisionAction(from: action))
     }
 
     private func scheduleDockPressedStateRecovery(at location: CGPoint,
@@ -525,9 +576,10 @@ final class DockExposeCoordinator: ObservableObject {
                                                   action: DockAction?) {
         var recoveryDelays: [TimeInterval] = [0.008]
         if action == .appExpose {
-            // App Exposé needs a later release pulse. An immediate release can collapse the just-opened
-            // Exposé state, while a delayed pulse still clears the Dock's pressed icon.
-            recoveryDelays = [0.28]
+            // App Exposé consumes the click-up, so the Dock can keep the icon visually pressed.
+            // Wait until the Exposé transition has settled, then release over Dock background only.
+            // A later second pulse overlaps the next real click cycle and can reintroduce hangs.
+            recoveryDelays = [0.35]
         }
         if action == .minimizeAll {
             // Minimize can reshuffle Dock state quickly; a second release pulse avoids
@@ -542,19 +594,58 @@ final class DockExposeCoordinator: ObservableObject {
                     Logger.debug("WORKFLOW: Skipping stale mouse-up recovery token=\(clickToken) latest=\(self.clickRecoveryTokenCounter)")
                     return
                 }
-                let releasePoint = self.neutralRecoveryPoint(from: location)
+                guard let releasePoint = self.recoveryMouseUpPoint(from: location,
+                                                                   expectedBundle: expectedBundle,
+                                                                   action: action) else {
+                    Logger.debug("WORKFLOW: Skipping mouse-up recovery token=\(clickToken) bundle=\(expectedBundle) reason=noSafeRecoveryPoint")
+                    return
+                }
                 postSyntheticMouseUpPassthrough(at: releasePoint, flags: [])
                 Logger.debug("WORKFLOW: Posted neutral mouse-up recovery token=\(clickToken) attempt=\(index + 1)/\(recoveryDelays.count) delayMs=\(Int(delay * 1000)) bundle=\(expectedBundle) point=(\(Int(releasePoint.x)),\(Int(releasePoint.y)))")
             }
         }
     }
 
-    private func neutralRecoveryPoint(from location: CGPoint) -> CGPoint {
-        // Never synthesize mouse events at an off-cursor location.
-        // Posting at distant coordinates can cause visible cursor jumps.
-        if let current = CGEvent(source: nil)?.location {
-            return current
+    private func recoveryMouseUpPoint(from location: CGPoint,
+                                      expectedBundle: String,
+                                      action: DockAction?) -> CGPoint? {
+        if action == .appExpose {
+            if let current = CGEvent(source: nil)?.location,
+               case .dockIcon(let currentBundle) = DockHitTest.pointKind(at: current),
+               currentBundle == expectedBundle {
+                return current
+            }
+            if case .dockIcon(let originalBundle) = DockHitTest.pointKind(at: location),
+               originalBundle == expectedBundle {
+                return location
+            }
+            if let current = CGEvent(source: nil)?.location,
+               DockHitTest.pointKind(at: current) == .dockBackground {
+                return current
+            }
+            return DockHitTest.neutralBackgroundPoint(near: location)
         }
+
+        // If the pointer is already on a safe Dock target, reuse it to avoid visible jumps.
+        if let current = CGEvent(source: nil)?.location {
+            switch DockHitTest.pointKind(at: current) {
+            case .dockBackground:
+                return current
+            case .dockIcon(let bundle):
+                if action != .appExpose, bundle == expectedBundle {
+                    return current
+                }
+            case .outsideDock:
+                break
+            }
+        }
+
+        // Otherwise find a nearby Dock background point so Dock receives the release without
+        // re-clicking the icon itself.
+        if let neutralPoint = DockHitTest.neutralBackgroundPoint(near: location) {
+            return neutralPoint
+        }
+
         return location
     }
 
@@ -612,6 +703,16 @@ final class DockExposeCoordinator: ObservableObject {
            lastTriggeredBundle != nil,
            lastExposeDockClickBundle == clickedBundle,
            frontmostBefore != clickedBundle {
+            if !isRecentExposeInteraction(maxAge: 1.0) {
+                Logger.debug("WORKFLOW: Clearing stale App Exposé tracking before deactivate/activate transition for \(clickedBundle)")
+                resetExposeTracking()
+                return executeFirstClickAction(for: clickedBundle,
+                                               flags: flags,
+                                               frontmostBefore: frontmostBefore,
+                                               windowCountHint: context.windowCountAtMouseDown,
+                                               forceActivateFallback: context.forceFirstClickActivateFallback)
+            }
+
             if appsWithoutWindowsInExpose.contains(clickedBundle) {
                 Logger.debug("WORKFLOW: Second click on app without windows (\(clickedBundle)) - activating and showing main window")
                 appsWithoutWindowsInExpose.remove(clickedBundle)
@@ -738,10 +839,18 @@ final class DockExposeCoordinator: ObservableObject {
                 Logger.debug("APP_EXPOSE_DECISION: click appExpose skipped for \(clickedBundle): fewer than two windows")
                 return false
             }
+            if shouldUseDeferredDockLifecycleForActiveAppExpose(bundleIdentifier: clickedBundle,
+                                                                flags: flags,
+                                                                frontmostBefore: frontmostBefore) {
+                Logger.debug("WORKFLOW: App Exposé trigger from click using deferred Dock pass-through path")
+                scheduleDeferredAppExposeTrigger(for: clickedBundle,
+                                                source: "activeClick",
+                                                origin: location)
+                return false
+            }
             Logger.debug("WORKFLOW: App Exposé trigger from click")
             triggerAppExpose(for: clickedBundle)
-            // Consume active-app App Exposé clicks so Dock cannot switch Spaces/windows underneath us.
-            return true
+            return false
         case .singleAppMode:
             performSingleAppMode(targetBundleIdentifier: clickedBundle,
                                  frontmostBefore: frontmostBefore,
@@ -1049,7 +1158,7 @@ final class DockExposeCoordinator: ObservableObject {
             lastActionExecutedSource = "firstClick"
             lastActionExecutedAt = Date()
             Logger.debug("APP_EXPOSE_DECISION: firstClick appExpose executing for \(bundleIdentifier)")
-            triggerAppExpose(for: bundleIdentifier)
+            scheduleDeferredAppExposeTrigger(for: bundleIdentifier, source: "firstClick")
             // Keep Dock's press/release lifecycle untouched for App Exposé.
             return false
         }
@@ -1126,7 +1235,7 @@ final class DockExposeCoordinator: ObservableObject {
             return true
         case .appExpose:
             Logger.debug("WORKFLOW: App Exposé trigger from first-click modifier")
-            triggerAppExpose(for: bundleIdentifier)
+            scheduleDeferredAppExposeTrigger(for: bundleIdentifier, source: "firstClickModifier")
             // Keep Dock's click lifecycle untouched for App Exposé.
             return false
         case .singleAppMode:
@@ -1172,6 +1281,8 @@ final class DockExposeCoordinator: ObservableObject {
     }
 
     private func resetExposeTracking() {
+        exposeTrackingExpiryTokenCounter += 1
+        deferredActiveAppExposeClickSequence = nil
         appExposeInvocationToken = nil
         lastTriggeredBundle = nil
         currentExposeApp = nil
@@ -1180,9 +1291,25 @@ final class DockExposeCoordinator: ObservableObject {
         appsWithoutWindowsInExpose.removeAll()
     }
 
+    private func handleWorkspaceActivation(_ notification: Notification) {
+        guard appExposeInvocationToken == nil else { return }
+        guard lastTriggeredBundle != nil || currentExposeApp != nil else { return }
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              let activatedBundle = app.bundleIdentifier else { return }
+
+        let trackedBundle = currentExposeApp ?? lastTriggeredBundle
+        if activatedBundle == trackedBundle || activatedBundle == "com.apple.dock" {
+            return
+        }
+
+        Logger.debug("WORKFLOW: Clearing App Exposé tracking on workspace activation activated=\(activatedBundle) tracked=\(trackedBundle ?? "nil")")
+        resetExposeTracking()
+    }
+
     private func completeAppExposeInvocation(token: UUID,
                                              bundleIdentifier: String,
-                                             startedAt: Date) {
+                                             startedAt: Date,
+                                             deferredContext: DeferredAppExposeContext?) {
         guard appExposeInvocationToken == token else { return }
 
         let previousLastTriggeredBundle = lastTriggeredBundle
@@ -1210,6 +1337,16 @@ final class DockExposeCoordinator: ObservableObject {
             lastExposeDockClickBundle = bundleIdentifier
             lastExposeInteractionAt = Date()
             appsWithoutWindowsInExpose.remove(bundleIdentifier)
+            scheduleExposeTrackingExpiry(for: bundleIdentifier)
+            if deferredContext?.source == "activeClick",
+               let origin = deferredContext?.origin {
+                clickRecoveryTokenCounter += 1
+                let recoveryToken = clickRecoveryTokenCounter
+                scheduleDockPressedStateRecovery(at: origin,
+                                                expectedBundle: bundleIdentifier,
+                                                clickToken: recoveryToken,
+                                                action: .appExpose)
+            }
             Logger.debug("WORKFLOW: App Exposé tracking commit confirmed for \(bundleIdentifier)")
             return
         }
@@ -1233,6 +1370,23 @@ final class DockExposeCoordinator: ObservableObject {
         } else {
             resetExposeTracking()
             Logger.debug("WORKFLOW: App Exposé tracking rollback target=\(bundleIdentifier) reason=\(rollbackReason) action=reset")
+        }
+    }
+
+    private func scheduleExposeTrackingExpiry(for bundleIdentifier: String) {
+        exposeTrackingExpiryTokenCounter += 1
+        let token = exposeTrackingExpiryTokenCounter
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + exposeTrackingExpiryWindow) { [weak self] in
+            guard let self else { return }
+            guard token == self.exposeTrackingExpiryTokenCounter else { return }
+            guard self.appExposeInvocationToken == nil else { return }
+            guard self.currentExposeApp == bundleIdentifier || self.lastTriggeredBundle == bundleIdentifier else { return }
+            guard self.isRecentExposeInteraction(maxAge: self.exposeTrackingExpiryWindow) else {
+                Logger.debug("WORKFLOW: Expiring App Exposé tracking target=\(bundleIdentifier) after inactivity window")
+                self.resetExposeTracking()
+                return
+            }
         }
     }
 
@@ -1265,7 +1419,9 @@ final class DockExposeCoordinator: ObservableObject {
             }
             let action = configuredAction(for: .click, flags: flags)
             if action == .appExpose {
-                return shouldConsumeActiveClickAppExpose(for: clickedBundle, flags: flags)
+                return shouldConsumeActiveClickAppExpose(for: clickedBundle,
+                                                         flags: flags,
+                                                         frontmostBefore: frontmostBefore)
             }
             return DockDecisionEngine.shouldConsumeActiveClickAction(
                 action: decisionAction(from: action),
@@ -1281,7 +1437,9 @@ final class DockExposeCoordinator: ObservableObject {
 
         let action = configuredAction(for: .click, flags: flags)
         if action == .appExpose {
-            return shouldConsumeActiveClickAppExpose(for: clickedBundle, flags: flags)
+            return shouldConsumeActiveClickAppExpose(for: clickedBundle,
+                                                     flags: flags,
+                                                     frontmostBefore: frontmostBefore)
         }
         return DockDecisionEngine.shouldConsumeActiveClickAction(
             action: decisionAction(from: action),
@@ -1424,7 +1582,8 @@ final class DockExposeCoordinator: ObservableObject {
     }
 
     private func shouldConsumeActiveClickAppExpose(for bundleIdentifier: String,
-                                                   flags: CGEventFlags) -> Bool {
+                                                   flags: CGEventFlags,
+                                                   frontmostBefore: String?) -> Bool {
         let windowCount = WindowManager.totalWindowCount(bundleIdentifier: bundleIdentifier)
         guard windowCount > 0 else { return false }
 
@@ -1435,10 +1594,88 @@ final class DockExposeCoordinator: ObservableObject {
             : preferences.appExposeMultipleWindowsRequired(slot: clickSlot)
 
         let canRunAppExpose = !requiresMultipleWindows || windowCount >= 2
+        if canRunAppExpose,
+           shouldUseDeferredDockLifecycleForActiveAppExpose(bundleIdentifier: bundleIdentifier,
+                                                            flags: flags,
+                                                            frontmostBefore: frontmostBefore) {
+            Logger.debug("APP_EXPOSE_DECISION: click appExpose using deferred Dock pass-through path for \(bundleIdentifier)")
+            return false
+        }
         return DockDecisionEngine.shouldConsumeActiveClickAction(
             action: .appExpose,
             canRunAppExpose: canRunAppExpose
         )
+    }
+
+    private func shouldTriggerDeferredActiveAppExposeOnMouseDown(for context: PendingClickContext) -> Bool {
+        let action = configuredAction(for: .click, flags: context.flags)
+        guard action == .appExpose else { return false }
+        let clickModifier = modifierCombination(from: context.flags)
+        let clickSlot = appExposeSlotKey(for: .click, modifier: clickModifier)
+        let requiresMultipleWindows = clickModifier == .none
+            ? preferences.clickAppExposeRequiresMultipleWindows
+            : preferences.appExposeMultipleWindowsRequired(slot: clickSlot)
+        let windowCount = context.windowCountAtMouseDown ?? WindowManager.totalWindowCount(bundleIdentifier: context.clickedBundle)
+        guard windowCount > 0 else { return false }
+        guard !requiresMultipleWindows || windowCount >= 2 else { return false }
+        return shouldUseDeferredDockLifecycleForActiveAppExpose(bundleIdentifier: context.clickedBundle,
+                                                                flags: context.flags,
+                                                                frontmostBefore: context.frontmostBefore)
+    }
+
+    private func shouldSchedulePendingDockClickWatchdog(for context: PendingClickContext) -> Bool {
+        guard modifierCombination(from: context.flags) == .none else { return false }
+        guard preferences.firstClickBehavior == .activateApp else { return false }
+        guard preferences.clickAction == .appExpose else { return false }
+        return true
+    }
+
+    private func schedulePendingDockClickWatchdog(context: PendingClickContext,
+                                                  watchdogToken: UInt64) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) { [weak self] in
+            guard let self else { return }
+            guard watchdogToken == self.pendingDockClickWatchdogTokenCounter else { return }
+            guard self.pendingClickContext?.clickSequence == context.clickSequence else { return }
+            guard !self.pendingClickWasDragged else { return }
+            guard let releasePoint = self.recoveryMouseUpPoint(from: context.location,
+                                                               expectedBundle: context.clickedBundle,
+                                                               action: nil) else {
+                return
+            }
+            Logger.debug("WORKFLOW: Pending Dock click watchdog releasing click=\(context.clickSequence) bundle=\(context.clickedBundle) point=(\(Int(releasePoint.x)),\(Int(releasePoint.y)))")
+            self.pendingClickContext = nil
+            self.pendingClickWasDragged = false
+            if self.deferredActiveAppExposeClickSequence == context.clickSequence {
+                self.deferredActiveAppExposeClickSequence = nil
+            }
+            postSyntheticMouseUpPassthrough(at: releasePoint, flags: [])
+        }
+    }
+
+    private func scheduleDeferredActiveAppExposePendingClickCleanup(clickSequence: UInt64) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self else { return }
+            guard self.deferredActiveAppExposeClickSequence == clickSequence else { return }
+            guard self.pendingClickContext?.clickSequence == clickSequence else { return }
+            Logger.debug("WORKFLOW: Clearing stale pending click after deferred active-app App Exposé click=\(clickSequence)")
+            self.pendingClickContext = nil
+            self.pendingClickWasDragged = false
+        }
+    }
+
+    private func shouldUseDeferredDockLifecycleForActiveAppExpose(bundleIdentifier: String,
+                                                                  flags: CGEventFlags,
+                                                                  frontmostBefore: String?) -> Bool {
+        guard modifierCombination(from: flags) == .none else { return false }
+        guard frontmostBefore == bundleIdentifier else { return false }
+        guard preferences.firstClickBehavior == .activateApp else { return false }
+        guard preferences.clickAction == .appExpose else { return false }
+        guard preferences.clickAppExposeRequiresMultipleWindows == false else { return false }
+        guard appExposeInvocationToken == nil else { return false }
+        guard lastTriggeredBundle == nil else { return false }
+        guard currentExposeApp == nil else { return false }
+        guard lastExposeDockClickBundle == nil else { return false }
+        return true
     }
 
     private func performActivateAppAction(bundleIdentifier: String) -> Bool {
@@ -1557,7 +1794,8 @@ final class DockExposeCoordinator: ObservableObject {
         lastMinimizeToggleTime[bundleIdentifier] = Date().timeIntervalSinceReferenceDate
     }
 
-    private func triggerAppExpose(for bundleIdentifier: String) {
+    private func triggerAppExpose(for bundleIdentifier: String,
+                                  deferredContext: DeferredAppExposeContext? = nil) {
         Logger.debug("WORKFLOW: Triggering App Exposé for \(bundleIdentifier)")
 
         let invocationToken = UUID()
@@ -1573,11 +1811,57 @@ final class DockExposeCoordinator: ObservableObject {
             }
         }
 
-        DispatchQueue.main.async { [weak self] in
+        scheduleAppExposeInvocationCompletion(token: invocationToken,
+                                              bundleIdentifier: bundleIdentifier,
+                                              startedAt: startedAt,
+                                              remainingAttempts: frontmost == bundleIdentifier ? 0 : 4,
+                                              deferredContext: deferredContext)
+    }
+
+    private func scheduleDeferredAppExposeTrigger(for bundleIdentifier: String,
+                                                  source: String,
+                                                  origin: CGPoint? = nil) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
+            Logger.debug("WORKFLOW: Deferred App Exposé trigger source=\(source) target=\(bundleIdentifier)")
+            self?.triggerAppExpose(for: bundleIdentifier,
+                                   deferredContext: DeferredAppExposeContext(source: source, origin: origin))
+        }
+    }
+
+    private func scheduleAppExposeInvocationCompletion(token: UUID,
+                                                       bundleIdentifier: String,
+                                                       startedAt: Date,
+                                                       remainingAttempts: Int,
+                                                       deferredContext: DeferredAppExposeContext?) {
+        let delay: TimeInterval = remainingAttempts == 0 ? 0 : 0.06
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }
-            self.completeAppExposeInvocation(token: invocationToken,
-                                             bundleIdentifier: bundleIdentifier,
-                                             startedAt: startedAt)
+            guard self.appExposeInvocationToken == token else { return }
+
+            let frontmost = FrontmostAppTracker.frontmostBundleIdentifier()
+            if frontmost == bundleIdentifier || remainingAttempts == 0 {
+                self.completeAppExposeInvocation(token: token,
+                                                 bundleIdentifier: bundleIdentifier,
+                                                 startedAt: startedAt,
+                                                 deferredContext: deferredContext)
+                return
+            }
+
+            Logger.debug("WORKFLOW: Waiting for App Exposé activation target=\(bundleIdentifier) frontmost=\(frontmost ?? "nil") remainingAttempts=\(remainingAttempts)")
+
+            if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleIdentifier }) {
+                if app.isHidden {
+                    app.unhide()
+                }
+                _ = WindowManager.activateAndShowMainWindow(bundleIdentifier: bundleIdentifier)
+                _ = app.activate(options: [.activateIgnoringOtherApps])
+            }
+
+            self.scheduleAppExposeInvocationCompletion(token: token,
+                                                       bundleIdentifier: bundleIdentifier,
+                                                       startedAt: startedAt,
+                                                       remainingAttempts: remainingAttempts - 1,
+                                                       deferredContext: deferredContext)
         }
     }
     

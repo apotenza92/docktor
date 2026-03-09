@@ -32,8 +32,10 @@ final class DockClickEventTap {
     private var leftMouseDownPoint: CGPoint?
     private var leftMouseDownButton: Int?
     private var leftMouseDownFlags: CGEventFlags?
+    private var leftMouseDownUptime: TimeInterval?
     private var leftMouseDragExceededThreshold = false
     private let leftMouseDragThreshold: CGFloat = 6
+    private let duplicateMouseDownSuppressionWindow: TimeInterval = 0.35
     private var timeoutPassThroughUntilUptime: TimeInterval = 0
     private let timeoutPassThroughCooldown: TimeInterval = 0.18
     private var cachedKnownRemapperRunning = false
@@ -153,6 +155,7 @@ final class DockClickEventTap {
         leftMouseDownPoint = nil
         leftMouseDownButton = nil
         leftMouseDownFlags = nil
+        leftMouseDownUptime = nil
         leftMouseDragExceededThreshold = false
     }
 
@@ -196,6 +199,7 @@ final class DockClickEventTap {
     private func didReceiveClick(event: CGEvent, phase: ClickPhase) -> Bool {
         let sourceUserData = event.getIntegerValueField(.eventSourceUserData)
         if sourceUserData == DockClickEventTap.syntheticReleasePassthroughUserData {
+            resetInteractionState()
             syntheticReleaseHandler?()
             Logger.debug("DockClickEventTap: Passthrough synthetic release event")
             return false
@@ -211,9 +215,36 @@ final class DockClickEventTap {
 
         switch phase {
         case .down:
+            let nowUptime = ProcessInfo.processInfo.systemUptime
+            if let existingPoint = leftMouseDownPoint,
+               let existingButton = leftMouseDownButton,
+               let existingUptime = leftMouseDownUptime {
+                let dx = location.x - existingPoint.x
+                let dy = location.y - existingPoint.y
+                let distance = hypot(dx, dy)
+                let withinWindow = nowUptime - existingUptime <= duplicateMouseDownSuppressionWindow
+                if existingButton == buttonNumber && withinWindow && distance <= leftMouseDragThreshold {
+                    Logger.debug("DockClickEventTap: Healing duplicate mouse down by restarting click tracking (distance=\(distance), dt=\(nowUptime - existingUptime))")
+                    leftMouseDownPoint = nil
+                    leftMouseDownButton = nil
+                    leftMouseDownFlags = nil
+                    leftMouseDownUptime = nil
+                    leftMouseDragExceededThreshold = false
+                }
+                else {
+                    Logger.debug("DockClickEventTap: Resetting stale pending mouse down before starting a new click")
+                    leftMouseDownPoint = nil
+                    leftMouseDownButton = nil
+                    leftMouseDownFlags = nil
+                    leftMouseDownUptime = nil
+                    leftMouseDragExceededThreshold = false
+                }
+            }
+
             leftMouseDownPoint = location
             leftMouseDownButton = buttonNumber
             leftMouseDownFlags = currentFlags
+            leftMouseDownUptime = nowUptime
             leftMouseDragExceededThreshold = false
             Logger.debug("DockClickEventTap: Raw click down at \(location.x), \(location.y) (button: \(buttonNumber))")
             let shouldConsume = clickHandler?(location, buttonNumber, currentFlags, .down) ?? false
@@ -243,6 +274,7 @@ final class DockClickEventTap {
             leftMouseDownPoint = nil
             leftMouseDownButton = nil
             leftMouseDownFlags = nil
+            leftMouseDownUptime = nil
             leftMouseDragExceededThreshold = false
             if dragged {
                 Logger.debug("DockClickEventTap: Suppressing consume on mouse up due to drag")

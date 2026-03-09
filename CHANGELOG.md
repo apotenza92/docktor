@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.0.36]
+
+- Fixed intermittent Dock icon hang/context-menu regressions on the default `activateApp -> active-app App Exposé` path by hardening click lifecycle recovery in `DockExposeCoordinator` and `DockClickEventTap`.
+- Added explicit stale Exposé tracking expiry/cleanup and deferred active-click `App Exposé` triggering safeguards to prevent collapsed or missed invokes during repeated cycles.
+- Added `scripts/automated_default_active_app_expose_stress.sh` for deterministic real Dock-click stress validation of the default active-app App Exposé workflow.
+
 ## [v0.0.35]
 
 - Fixed an App Exposé regression where the active-app second-click transition could begin and then immediately collapse again because Dock pressed-state recovery posted a synthetic release into the Exposé animation window.

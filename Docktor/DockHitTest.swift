@@ -1,20 +1,58 @@
 import Cocoa
 
 enum DockHitTest {
+    enum PointKind: Equatable {
+        case dockIcon(String)
+        case dockBackground
+        case outsideDock
+    }
+
     static func bundleIdentifierAtPoint(_ point: CGPoint) -> String? {
-        guard isNearDockEdge(point) else { return nil }
-        guard let element = element(at: point) else { return nil }
-        guard isInDockProcess(element) else { return nil }
+        if case let .dockIcon(bundle) = pointKind(at: point) {
+            return bundle
+        }
+        return nil
+    }
+
+    static func pointKind(at point: CGPoint) -> PointKind {
+        guard isNearDockEdge(point) else { return .outsideDock }
+        guard let element = element(at: point) else { return .outsideDock }
+        guard isInDockProcess(element) else { return .outsideDock }
 
         var current: AXUIElement? = element
         while let el = current, isInDockProcess(el) {
             if let bundle = bundleIdentifier(for: el), bundle != "com.apple.dock" {
                 Logger.debug("Hit test resolved bundle: \(bundle)")
-                return bundle
+                return .dockIcon(bundle)
             }
             current = parent(of: el)
         }
-        Logger.debug("Hit test found no bundle while walking parents.")
+
+        Logger.debug("Hit test resolved Dock background.")
+        return .dockBackground
+    }
+
+    static func neutralBackgroundPoint(near point: CGPoint,
+                                       searchRadius: CGFloat = 120,
+                                       step: CGFloat = 12) -> CGPoint? {
+        if pointKind(at: point) == .dockBackground {
+            return point
+        }
+
+        let offsets = stride(from: CGFloat(0), through: searchRadius, by: step).flatMap { distance -> [CGFloat] in
+            distance == 0 ? [0] : [distance, -distance]
+        }
+
+        for dy in offsets {
+            for dx in offsets {
+                if dx == 0, dy == 0 { continue }
+                let candidate = CGPoint(x: point.x + dx, y: point.y + dy)
+                if pointKind(at: candidate) == .dockBackground {
+                    return candidate
+                }
+            }
+        }
+
         return nil
     }
 
