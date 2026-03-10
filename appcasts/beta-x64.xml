@@ -5,19 +5,18 @@
     <description>Docktor update feed (beta channel)</description>
     <language>en</language>
     <item>
-      <title>Version 0.0.37</title>
-      <link>https://github.com/apotenza92/docktor/releases/tag/v0.0.37</link>
-      <sparkle:version>3790000</sparkle:version>
-      <sparkle:shortVersionString>0.0.37</sparkle:shortVersionString>
+      <title>Version 0.0.38-beta.1</title>
+      <link>https://github.com/apotenza92/docktor/releases/tag/v0.0.38-beta.1</link>
+      <sparkle:version>3800001</sparkle:version>
+      <sparkle:shortVersionString>0.0.38-beta.1</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
       <sparkle:fullReleaseNotesLink>https://github.com/apotenza92/docktor/blob/main/CHANGELOG.md</sparkle:fullReleaseNotesLink>
-      <description sparkle:format="plain-text"><![CDATA[- Fixed default active-app App Exposé bounce-out by removing mouse-down pre-triggering and enforcing mouse-up pass-through trigger ordering.
-- Added rapid second-click promotion logic for default `first click = Activate App` flows so quick double-clicks can still execute mapped active-click actions (including App Exposé) using macOS double-click timing.
-- Added and hardened double-click regression harnesses (`automated_default_active_app_expose_double_click.sh`, `automated_default_active_click_double_click_generic.sh`) plus shared click-hold support in `scripts/lib/test_common.sh`.]]></description>
-      <pubDate>Mon, 09 Mar 2026 13:45:36 +0000</pubDate>
-      <enclosure url="https://github.com/apotenza92/docktor/releases/download/v0.0.37/Docktor-Beta-v0.0.37-macos-x64.zip"
-                 sparkle:edSignature="ORDdMI1XSf3dDXYvuVg+Ezh0bk/p3kRZDOJCgFYoO1Wv6wt4hFYeEus5nk+0g7UOnL9MPLQIdSL8aVYcJEimBw=="
-                 length="2687003"
+      <description sparkle:format="plain-text"><![CDATA[- Fixed beta branding so the settings window, status item accessibility label, and menu item labels use the bundle product name consistently (`Docktor Beta` for beta builds).
+- Updated remaining settings copy that referenced the stable app name so beta builds no longer show mixed `Docktor`/`Docktor Beta` strings.]]></description>
+      <pubDate>Tue, 10 Mar 2026 01:32:49 +0000</pubDate>
+      <enclosure url="https://github.com/apotenza92/docktor/releases/download/v0.0.38-beta.1/Docktor-Beta-v0.0.38-beta.1-macos-x64.zip"
+                 sparkle:edSignature="Hvc1igTTzdpE8WHXGj7XH6BT3udqeTK26Gz+2HXWSL2WKcJ+LvEwbunzuDn3vRaioxKSy7btNglPPIwdjF/1BQ=="
+                 length="2687346"
                  type="application/octet-stream" />
     </item>
   </channel>
