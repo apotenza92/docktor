@@ -328,6 +328,7 @@
 
       .command-box {
         background: var(--channel-accent);
+        border: none;
         border-radius: 8px;
         overflow: hidden;
         cursor: pointer;
@@ -335,6 +336,9 @@
         display: inline-flex;
         flex-direction: column;
         align-items: center;
+        -webkit-appearance: none;
+        appearance: none;
+        font: inherit;
       }
 
       .command-box:hover {
@@ -681,7 +685,14 @@
           </a>
 
           <div class="mac-homebrew-section" id="mac-homebrew-section">
-            <div class="command-box" id="mac-homebrew-box">
+            <div
+              class="command-box"
+              id="mac-homebrew-box"
+              role="button"
+              tabindex="0"
+              title="Copy Homebrew command"
+              aria-label="Copy Homebrew command"
+            >
               <div class="command-label" id="mac-homebrew-label">
                 Or install via Homebrew:
               </div>
@@ -690,10 +701,10 @@
                   >brew tap apotenza92/tap
 brew install --cask apotenza92/tap/docktor</code
                 >
-                <button
+                <div
                   class="copy-btn"
                   id="mac-homebrew-copy"
-                  title="Copy command"
+                  aria-hidden="true"
                 >
                   <svg viewBox="0 0 24 24" fill="currentColor">
                     <path
@@ -701,7 +712,7 @@ brew install --cask apotenza92/tap/docktor</code
                     />
                   </svg>
                   <span>Copy</span>
-                </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1127,7 +1138,6 @@ brew install --cask apotenza92/tap/docktor</code
 
       async function handleHomebrewCopy(event) {
         event.preventDefault();
-        event.stopPropagation();
 
         try {
           await copyTextToClipboard(getHomebrewCommand());
@@ -1136,6 +1146,12 @@ brew install --cask apotenza92/tap/docktor</code
         } catch (error) {
           console.error("Failed to copy:", error);
           setCopyButtonState(false);
+        }
+      }
+
+      function handleHomebrewKeydown(event) {
+        if (event.key === "Enter" || event.key === " ") {
+          handleHomebrewCopy(event);
         }
       }
 
@@ -1243,11 +1259,11 @@ brew install --cask apotenza92/tap/docktor</code
           .addEventListener("click", () => setMacArch("x64"));
 
         document
-          .getElementById("mac-homebrew-copy")
+          .getElementById("mac-homebrew-box")
           .addEventListener("click", handleHomebrewCopy);
         document
           .getElementById("mac-homebrew-box")
-          .addEventListener("click", handleHomebrewCopy);
+          .addEventListener("keydown", handleHomebrewKeydown);
 
         const btn = document.getElementById("download-btn");
         btn.addEventListener("click", () => {
