@@ -414,12 +414,7 @@
       }
 
       .copy-btn.copied {
-        color: #22c55e;
-      }
-
-      .copy-btn.copied svg,
-      .copy-btn.copied span {
-        color: #22c55e;
+        opacity: 0.95;
       }
 
       .channel-toggle {
@@ -1092,19 +1087,25 @@ brew install --cask apotenza92/tap/docktor</code
           : "brew tap apotenza92/tap\nbrew install --cask apotenza92/tap/docktor";
       }
 
+      function copyIconSvg() {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M15 9V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"></path></svg>';
+      }
+
+      function copiedIconSvg() {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 9.5 17 19 7.5"></path></svg>';
+      }
+
       function setCopyButtonState(copied) {
         const copyBtn = document.getElementById("mac-homebrew-copy");
         if (!copyBtn) return;
 
         if (copied) {
-          copyBtn.innerHTML =
-            '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg><span>Copied!</span>';
+          copyBtn.innerHTML = `${copiedIconSvg()}<span>Copied!</span>`;
           copyBtn.classList.add("copied");
           return;
         }
 
-        copyBtn.innerHTML =
-          '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg><span>Copy</span>';
+        copyBtn.innerHTML = `${copyIconSvg()}<span>Copy</span>`;
         copyBtn.classList.remove("copied");
       }
 
