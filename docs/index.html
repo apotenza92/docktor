@@ -493,6 +493,15 @@
         display: none;
       }
 
+      .intro-copy {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        line-height: 1.55;
+        max-width: 500px;
+        margin-left: auto;
+        margin-right: auto;
+      }
+
       .meta-note {
         font-size: 0.8rem;
         color: var(--text-muted);
@@ -615,24 +624,16 @@
     <div class="container">
       <img src="./icon.png" alt="Docktor" class="icon" id="app-icon" />
       <h1 id="app-title">Docktor</h1>
-      <p
-        style="
-          font-size: 0.85rem;
-          color: var(--text-muted);
-          margin-top: 1rem;
-          margin-bottom: 0.75rem;
-          line-height: 1.55;
-        "
-      >
+      <p class="intro-copy" style="margin-top: 1rem; margin-bottom: 0.75rem">
         Customize Dock icon click, double-click, and scroll actions, including
         App Exposé (show all windows for that app), Bring All to Front, Hide
         App, Hide Others, Minimize All, Quit App, Activate App, and Single App
         Mode.
       </p>
 
-      <p class="meta-note" id="meta-note">
-        Double clicking a Dock icon opens App Exposé to show all open windows
-        for that app.
+      <p class="intro-copy" id="meta-note" style="margin-top: 0; margin-bottom: 2rem">
+        Docktor ships with double click mapped to App Exposé, so double
+        clicking a Dock icon shows all open windows for that app.
       </p>
 
       <div style="display: flex; justify-content: center; margin-bottom: 1rem">
