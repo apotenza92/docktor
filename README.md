@@ -2,7 +2,10 @@
 
 ![Docktor icon](Docktor/Assets.xcassets/AppIcon.appiconset/icon_256x256.png)
 
-[Download Page](https://apotenza92.github.io/docktor/)
+<a href="https://apotenza92.github.io/docktor/">
+  <img src="https://img.shields.io/badge/Download-Docktor-f0a050?style=for-the-badge&logo=apple&logoColor=white" alt="Download Docktor" height="40">
+</a>
+<br><br>
 
 Docktor is a lightweight macOS menu bar app for customizing Dock icon click, double-click, and scroll actions.
 
@@ -18,7 +21,7 @@ Enjoying Docktor?
 
 ## Install
 
-The fastest public install flow is on the [Download Page](https://apotenza92.github.io/docktor/).
+The fastest public install flow is on the [Download for macOS page](https://apotenza92.github.io/docktor/).
 
 ### Homebrew
 
