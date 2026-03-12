@@ -237,11 +237,36 @@ def load_signing_key(signing_secret: str | None) -> Ed25519PrivateKey | None:
     if not normalized:
         return None
 
-    decoded = base64.b64decode(normalized)
-    if len(decoded) == 32:
-        return Ed25519PrivateKey.from_private_bytes(decoded)
-    if len(decoded) == 64:
-        return Ed25519PrivateKey.from_private_bytes(decoded[:32])
+    candidates = [normalized]
+    if (
+        len(normalized) >= 2
+        and normalized[0] == normalized[-1]
+        and normalized[0] in {"'", '"'}
+    ):
+        candidates.append(normalized[1:-1].strip())
+
+    for candidate in candidates:
+        try:
+            decoded = base64.b64decode(candidate, validate=True)
+        except Exception:
+            continue
+
+        if len(decoded) == 32:
+            return Ed25519PrivateKey.from_private_bytes(decoded)
+        if len(decoded) == 64:
+            return Ed25519PrivateKey.from_private_bytes(decoded[:32])
+
+        # Some secret stores end up double-encoding the 32-byte seed.
+        try:
+            inner = decoded.decode("utf-8").strip()
+            nested = base64.b64decode(inner, validate=True)
+        except Exception:
+            continue
+
+        if len(nested) == 32:
+            return Ed25519PrivateKey.from_private_bytes(nested)
+        if len(nested) == 64:
+            return Ed25519PrivateKey.from_private_bytes(nested[:32])
 
     raise RuntimeError(
         "Unsupported Sparkle private key format. Expected base64-encoded 32-byte seed."
