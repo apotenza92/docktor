@@ -4,14 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/test_common.sh"
 
-LOG_FILE="/tmp/docktor-issue1-automation.log"
+LOG_FILE="/tmp/dockmint-issue1-automation.log"
 
 run_test_preflight true
 capture_dock_state
 
 cleanup() {
-  stop_docktor
-  ensure_no_docktor
+  stop_dockmint
+  ensure_no_dockmint
   restore_dock_state
 }
 trap cleanup EXIT
@@ -37,7 +37,7 @@ ensure_two_apps_visible() {
 
 issue2_case() {
   local dock_name="$1" target_proc="$2" other_proc="$3"
-  assert_docktor_alive "$LOG_FILE" "issue2 Docktor process"
+  assert_dockmint_alive "$LOG_FILE" "issue2 Dockmint process"
   ensure_two_apps_visible "$target_proc" "$other_proc"
   activate_finder
 
@@ -78,8 +78,8 @@ issue2_case() {
 run_issue2_suite() {
   echo "[issue1+2] wrong target / finicky hide"
   configure_issue2_prefs
-  start_docktor "$LOG_FILE"
-  assert_docktor_alive "$LOG_FILE" "issue2 startup"
+  start_dockmint "$LOG_FILE"
+  assert_dockmint_alive "$LOG_FILE" "issue2 startup"
 
   for round in 1 2 3; do
     echo "  round $round"
@@ -91,8 +91,8 @@ run_issue2_suite() {
 run_issue3_suite() {
   echo "[issue3] third click should not be swallowed"
   configure_issue3_prefs
-  start_docktor "$LOG_FILE"
-  assert_docktor_alive "$LOG_FILE" "issue3 startup"
+  start_dockmint "$LOG_FILE"
+  assert_dockmint_alive "$LOG_FILE" "issue3 startup"
 
   ensure_two_apps_visible "$TEST_PROCESS_A" "$TEST_PROCESS_B"
   activate_finder
@@ -122,17 +122,17 @@ run_issue3_suite() {
 
 run_settings_stability_suite() {
   echo "[prefs] repeated settings opens should not crash"
-  start_docktor "$LOG_FILE"
-  assert_docktor_alive "$LOG_FILE" "settings stability startup"
+  start_dockmint "$LOG_FILE"
+  assert_dockmint_alive "$LOG_FILE" "settings stability startup"
 
   for _ in $(seq 1 12); do
-    osascript -e 'tell application "System Events" to tell process "Docktor" to set frontmost to true' >/dev/null 2>&1 || true
+    osascript -e 'tell application "System Events" to tell process "Dockmint" to set frontmost to true' >/dev/null 2>&1 || true
     osascript -e 'tell application "System Events" to keystroke "," using command down' >/dev/null 2>&1 || true
     sleep 0.18
-    assert_docktor_alive "$LOG_FILE" "settings stability iteration"
+    assert_dockmint_alive "$LOG_FILE" "settings stability iteration"
   done
 
-  echo "  PASS Docktor alive after repeated settings opens"
+  echo "  PASS Dockmint alive after repeated settings opens"
 }
 
 echo "== full issue #1 regression run =="

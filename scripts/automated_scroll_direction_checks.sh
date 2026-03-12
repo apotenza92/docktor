@@ -4,14 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/test_common.sh"
 
-LOG_FILE="/tmp/docktor-scroll-direction-checks.log"
+LOG_FILE="/tmp/dockmint-scroll-direction-checks.log"
 
 run_test_preflight false
 capture_dock_state
 
 cleanup() {
-  stop_docktor
-  ensure_no_docktor
+  stop_dockmint
+  ensure_no_dockmint
   restore_dock_state
 }
 trap cleanup EXIT
@@ -92,8 +92,8 @@ write_pref_string clickAction none
 write_pref_string scrollUpAction hideOthers
 write_pref_string scrollDownAction hideApp
 
-start_docktor "$LOG_FILE"
-assert_docktor_alive "$LOG_FILE" "scroll checks startup"
+start_dockmint "$LOG_FILE"
+assert_dockmint_alive "$LOG_FILE" "scroll checks startup"
 set_process_visible "$TEST_PROCESS_A" true
 set_process_visible "$TEST_PROCESS_B" true
 activate_finder
@@ -127,6 +127,6 @@ start_line=$(( $(wc -l < "$LOG_FILE") + 1 ))
 post_scroll_event "$x" "$y" 24 1
 assert_scroll_action "up" "continuous positive -> up" "$start_line"
 
-stop_docktor
+stop_dockmint
 
 echo "== scroll direction gui checks passed =="

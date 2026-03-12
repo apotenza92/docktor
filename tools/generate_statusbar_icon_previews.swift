@@ -18,6 +18,13 @@ let fm = FileManager.default
 let cwd = URL(fileURLWithPath: fm.currentDirectoryPath)
 let outputDir = cwd.appendingPathComponent("artifacts/statusbar-icon-previews", isDirectory: true)
 
+func lucidePoint(_ x: CGFloat, _ y: CGFloat, in rect: NSRect) -> NSPoint {
+    NSPoint(
+        x: rect.minX + rect.width * (x / 24.0),
+        y: rect.minY + rect.height * ((24.0 - y) / 24.0)
+    )
+}
+
 func drawStatusBarGlyph(pointSize: CGFloat, color: NSColor) -> NSImage {
     let size = NSSize(width: pointSize, height: pointSize)
     let image = NSImage(size: size)
@@ -36,63 +43,38 @@ func drawStatusBarGlyph(pointSize: CGFloat, color: NSColor) -> NSImage {
         return path
     }
 
-    let inset: CGFloat = max(0.55, pointSize * 0.045)
-    var glyphRect = NSRect(x: inset, y: inset, width: size.width - inset * 2, height: size.height - inset * 2)
-    glyphRect.origin.y -= pointSize * 0.008
+    let inset: CGFloat = max(0.65, pointSize * 0.055)
+    let glyphRect = NSRect(x: inset, y: inset, width: size.width - inset * 2, height: size.height - inset * 2)
+    let strokeWidth = 2.0 * min(glyphRect.width, glyphRect.height) / 24.0
 
-    NSGraphicsContext.saveGraphicsState()
-    let transform = NSAffineTransform()
-    transform.translateX(by: glyphRect.minX, yBy: glyphRect.minY)
-    transform.scaleX(by: glyphRect.width / 24.0, yBy: glyphRect.height / 24.0)
-    transform.translateX(by: 24.0, yBy: 0.0)
-    transform.scaleX(by: -1.0, yBy: 1.0)
-    transform.concat()
+    let leaf = newStrokePath()
+    leaf.lineWidth = strokeWidth
+    leaf.move(to: lucidePoint(11.0, 20.0, in: glyphRect))
+    leaf.curve(to: lucidePoint(9.8, 6.1, in: glyphRect),
+               controlPoint1: lucidePoint(7.2, 18.0, in: glyphRect),
+               controlPoint2: lucidePoint(6.9, 9.7, in: glyphRect))
+    leaf.curve(to: lucidePoint(19.0, 2.0, in: glyphRect),
+               controlPoint1: lucidePoint(15.5, 5.0, in: glyphRect),
+               controlPoint2: lucidePoint(17.0, 4.48, in: glyphRect))
+    leaf.curve(to: lucidePoint(21.0, 10.0, in: glyphRect),
+               controlPoint1: lucidePoint(20.0, 4.0, in: glyphRect),
+               controlPoint2: lucidePoint(21.0, 6.18, in: glyphRect))
+    leaf.curve(to: lucidePoint(11.0, 20.0, in: glyphRect),
+               controlPoint1: lucidePoint(21.0, 15.5, in: glyphRect),
+               controlPoint2: lucidePoint(16.22, 20.0, in: glyphRect))
+    leaf.close()
+    leaf.stroke()
 
-    let topBody = newStrokePath()
-    topBody.move(to: NSPoint(x: 6.0, y: 12.0))
-    topBody.line(to: NSPoint(x: 4.0, y: 12.0))
-    topBody.curve(to: NSPoint(x: 2.0, y: 10.0),
-                  controlPoint1: NSPoint(x: 2.9, y: 12.0),
-                  controlPoint2: NSPoint(x: 2.0, y: 11.1))
-    topBody.line(to: NSPoint(x: 2.0, y: 5.0))
-    topBody.curve(to: NSPoint(x: 4.0, y: 3.0),
-                  controlPoint1: NSPoint(x: 2.0, y: 3.9),
-                  controlPoint2: NSPoint(x: 2.9, y: 3.0))
-    topBody.line(to: NSPoint(x: 20.0, y: 3.0))
-    topBody.curve(to: NSPoint(x: 22.0, y: 5.0),
-                  controlPoint1: NSPoint(x: 21.1, y: 3.0),
-                  controlPoint2: NSPoint(x: 22.0, y: 3.9))
-    topBody.line(to: NSPoint(x: 22.0, y: 10.0))
-    topBody.curve(to: NSPoint(x: 20.0, y: 12.0),
-                  controlPoint1: NSPoint(x: 22.0, y: 11.1),
-                  controlPoint2: NSPoint(x: 21.1, y: 12.0))
-    topBody.line(to: NSPoint(x: 18.0, y: 12.0))
-    topBody.stroke()
-
-    let midBar = newStrokePath()
-    midBar.move(to: NSPoint(x: 6.0, y: 8.0))
-    midBar.line(to: NSPoint(x: 18.0, y: 8.0))
-    midBar.stroke()
-
-    let rightOutlet = newStrokePath()
-    rightOutlet.appendArc(withCenter: NSPoint(x: 16.5, y: 19.5),
-                          radius: 2.5,
-                          startAngle: -53.0,
-                          endAngle: 179.0,
-                          clockwise: false)
-    rightOutlet.line(to: NSPoint(x: 14.0, y: 12.0))
-    rightOutlet.stroke()
-
-    let leftOutlet = newStrokePath()
-    leftOutlet.appendArc(withCenter: NSPoint(x: 8.0, y: 17.0),
-                         radius: 2.0,
-                         startAngle: -134.5,
-                         endAngle: 0.0,
-                         clockwise: true)
-    leftOutlet.line(to: NSPoint(x: 10.0, y: 12.0))
-    leftOutlet.stroke()
-
-    NSGraphicsContext.restoreGraphicsState()
+    let vein = newStrokePath()
+    vein.lineWidth = strokeWidth
+    vein.move(to: lucidePoint(2.0, 21.0, in: glyphRect))
+    vein.curve(to: lucidePoint(7.08, 15.0, in: glyphRect),
+               controlPoint1: lucidePoint(2.0, 18.0, in: glyphRect),
+               controlPoint2: lucidePoint(3.85, 15.64, in: glyphRect))
+    vein.curve(to: lucidePoint(13.0, 12.0, in: glyphRect),
+               controlPoint1: lucidePoint(9.5, 14.52, in: glyphRect),
+               controlPoint2: lucidePoint(12.0, 13.0, in: glyphRect))
+    vein.stroke()
 
     return image
 }
@@ -117,7 +99,7 @@ func writePNG(_ image: NSImage, to url: URL) throws {
           let rep = NSBitmapImageRep(data: tiff),
           let data = rep.representation(using: .png, properties: [:]) else {
         throw NSError(
-            domain: "DocktorStatusBarPreview",
+            domain: "DockmintStatusBarPreview",
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "Failed to encode PNG"]
         )

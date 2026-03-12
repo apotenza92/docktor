@@ -15,14 +15,14 @@ QUIT_CYCLES="${QUIT_CYCLES:-1}"
 ACTIONS="${ACTIONS:-bringAllToFront hideApp hideOthers singleAppMode minimizeAll quitApp}"
 
 run_test_preflight true
-init_artifact_dir docktor-e2e-default-active-click-double-click-generic >/dev/null
+init_artifact_dir dockmint-e2e-default-active-click-double-click-generic >/dev/null
 
 LOG_FILE="$(artifact_path stress log)"
 : >"$LOG_FILE"
 
 cleanup() {
-  stop_docktor
-  ensure_no_docktor >/dev/null 2>&1 || true
+  stop_dockmint
+  ensure_no_dockmint >/dev/null 2>&1 || true
   restore_dock_state >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -87,7 +87,7 @@ restore_dynamic_test_app_candidates() {
 
     local process_name_lc
     process_name_lc="$(printf '%s' "$process_name" | tr '[:upper:]' '[:lower:]')"
-    if [[ "$process_name_lc" == "docktor" || "$process_name_lc" == "finder" ]]; then
+    if [[ "$process_name_lc" == "dockmint" || "$process_name_lc" == "finder" ]]; then
       continue
     fi
 
@@ -193,10 +193,10 @@ before_iteration_checks() {
 run_action_suite() {
   local action="$1"
   local cycles
-  local docktor_log_file
+  local dockmint_log_file
 
   cycles="$(action_cycles "$action")"
-  docktor_log_file="$(artifact_path "docktor-${action}" log)"
+  dockmint_log_file="$(artifact_path "dockmint-${action}" log)"
 
   write_pref_string firstClickBehavior activateApp
   write_pref_string clickAction "$action"
@@ -204,8 +204,8 @@ run_action_suite() {
   write_pref_bool showOnStartup false
   write_pref_bool clickAppExposeRequiresMultipleWindows false
 
-  start_docktor "$docktor_log_file" >>"$LOG_FILE" 2>&1
-  assert_docktor_alive "$docktor_log_file" "default active-click rapid double-click ($action)" >>"$LOG_FILE" 2>&1
+  start_dockmint "$dockmint_log_file" >>"$LOG_FILE" 2>&1
+  assert_dockmint_alive "$dockmint_log_file" "default active-click rapid double-click ($action)" >>"$LOG_FILE" 2>&1
 
   local iter
   for iter in $(seq 1 "$cycles"); do
@@ -224,9 +224,9 @@ run_action_suite() {
     prepare_iteration_state "$action" >>"$LOG_FILE" 2>&1
     before_iteration_checks "$action" "$iteration_label" >>"$LOG_FILE" 2>&1
 
-    before_promote="$(count_log_matches "$promote_pattern" "$docktor_log_file")"
-    before_deferred="$(count_log_matches "$deferred_pattern" "$docktor_log_file")"
-    before_direct="$(count_log_matches "$direct_pattern" "$docktor_log_file")"
+    before_promote="$(count_log_matches "$promote_pattern" "$dockmint_log_file")"
+    before_deferred="$(count_log_matches "$deferred_pattern" "$dockmint_log_file")"
+    before_direct="$(count_log_matches "$direct_pattern" "$dockmint_log_file")"
 
     activate_finder
     double_click_for_active_click "$TEST_DOCK_ICON_A"
@@ -234,9 +234,9 @@ run_action_suite() {
     local poll
     for poll in $(seq 1 "$POLL_ATTEMPTS"); do
       sleep "$POLL_SLEEP_SECONDS"
-      after_promote="$(count_log_matches "$promote_pattern" "$docktor_log_file")"
-      after_deferred="$(count_log_matches "$deferred_pattern" "$docktor_log_file")"
-      after_direct="$(count_log_matches "$direct_pattern" "$docktor_log_file")"
+      after_promote="$(count_log_matches "$promote_pattern" "$dockmint_log_file")"
+      after_deferred="$(count_log_matches "$deferred_pattern" "$dockmint_log_file")"
+      after_direct="$(count_log_matches "$direct_pattern" "$dockmint_log_file")"
 
       if verify_action_state "$action" "$iteration_label" \
         && { (( after_direct > before_direct || after_deferred > before_deferred )) \
@@ -258,7 +258,7 @@ run_action_suite() {
     fi
   done
 
-  stop_docktor
+  stop_dockmint
 }
 
 set_dock_autohide "$DOCK_AUTOHIDE" >>"$LOG_FILE" 2>&1 || true

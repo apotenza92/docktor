@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
-: "${BUNDLE_ID:=pzc.Dockter}"
+: "${BUNDLE_ID:=${DOCKTOR_BUNDLE_ID:-pzc.Dockter}}"
 : "${TEST_SELECTION_MODE:=deterministic}"
-: "${DOCKTOR_START_TIMEOUT_SECONDS:=12}"
-: "${DOCKTOR_READY_LOG_MARKER:=Event tap started.}"
-: "${TEST_ARTIFACT_ROOT:=/tmp/docktor-artifacts}"
+: "${DOCKMINT_START_TIMEOUT_SECONDS:=${DOCKTOR_START_TIMEOUT_SECONDS:-12}}"
+: "${DOCKMINT_READY_LOG_MARKER:=${DOCKTOR_READY_LOG_MARKER:-Event tap started.}}"
+: "${TEST_ARTIFACT_ROOT:=${DOCKTOR_TEST_ARTIFACT_ROOT:-/tmp/dockmint-artifacts}}"
 : "${MULTI_SPACE_TARGET_DOCK_ICON:=Brave Browser}"
 : "${MULTI_SPACE_TARGET_PROCESS:=Brave Browser}"
 : "${MULTI_SPACE_TARGET_BUNDLE:=com.brave.Browser}"
@@ -23,7 +23,7 @@ APP_EXECUTABLE_PATH="${APP_EXECUTABLE_PATH:-}"
 
 APP_PID=""
 TEST_ORIG_AUTOHIDE=""
-START_DOCKTOR_LAST_ERROR=""
+START_DOCKMINT_LAST_ERROR=""
 TEST_ARTIFACT_DIR=""
 TEST_MULTI_SPACE_TARGET_DOCK_ICON=""
 TEST_MULTI_SPACE_TARGET_PROCESS=""
@@ -73,15 +73,15 @@ require_tool() {
 
 discover_latest_debug_app_bundle() {
   local derived_data_root="$HOME/Library/Developer/Xcode/DerivedData"
-  local repo_debug_bundle="$PWD/.build/Build/Products/Debug/Docktor.app"
-  local repo_debug_executable_path="Contents/MacOS/Docktor"
+  local repo_debug_bundle="$PWD/.build/Build/Products/Debug/Dockmint.app"
+  local repo_debug_executable_path="Contents/MacOS/Dockmint"
   local -a candidates=()
   local xcode_settings=""
   local xcode_built_products_dir=""
   local xcode_full_product_name=""
   local xcode_executable_path=""
 
-  xcode_settings="$(xcodebuild -project Docktor.xcodeproj -scheme Docktor -configuration Debug -showBuildSettings 2>/dev/null || true)"
+  xcode_settings="$(xcodebuild -project Dockmint.xcodeproj -scheme Dockmint -configuration Debug -showBuildSettings 2>/dev/null || true)"
   if [[ -n "$xcode_settings" ]]; then
     xcode_built_products_dir="$(printf '%s\n' "$xcode_settings" | awk -F' = ' '/^[[:space:]]*BUILT_PRODUCTS_DIR = / { print $2; exit }')"
     xcode_full_product_name="$(printf '%s\n' "$xcode_settings" | awk -F' = ' '/^[[:space:]]*FULL_PRODUCT_NAME = / { print $2; exit }')"
@@ -102,7 +102,7 @@ discover_latest_debug_app_bundle() {
   if [[ -d "$derived_data_root" ]]; then
     while IFS= read -r candidate; do
       candidates+=("$candidate")
-    done < <(find "$derived_data_root" -type d -path "*/Build/Products/Debug/Docktor.app" 2>/dev/null)
+    done < <(find "$derived_data_root" -type d -path "*/Build/Products/Debug/Dockmint.app" 2>/dev/null)
   fi
 
   local latest_bundle=""
@@ -142,16 +142,16 @@ resolve_app_paths() {
       return 1
     fi
     APP_BUNDLE="$(cd "$APP_BUNDLE" && pwd -P)"
-    APP_BIN="$APP_BUNDLE/${APP_EXECUTABLE_PATH:-Contents/MacOS/Docktor}"
+    APP_BIN="$APP_BUNDLE/${APP_EXECUTABLE_PATH:-Contents/MacOS/Dockmint}"
   else
     local discovered_bundle
     discovered_bundle="$(discover_latest_debug_app_bundle || true)"
     if [[ -z "$discovered_bundle" ]]; then
-      echo "error: unable to discover Docktor Debug app bundle (set APP_BIN or APP_BUNDLE)" >&2
+      echo "error: unable to discover Dockmint Debug app bundle (set APP_BIN or APP_BUNDLE)" >&2
       return 1
     fi
     APP_BUNDLE="$discovered_bundle"
-    APP_BIN="$APP_BUNDLE/${APP_EXECUTABLE_PATH:-Contents/MacOS/Docktor}"
+    APP_BIN="$APP_BUNDLE/${APP_EXECUTABLE_PATH:-Contents/MacOS/Dockmint}"
   fi
 
   if [[ ! -x "$APP_BIN" ]]; then
@@ -211,7 +211,7 @@ run_test_preflight() {
   fi
 }
 
-docktor_startup_failure_reason_from_log() {
+dockmint_startup_failure_reason_from_log() {
   local log_file="$1"
 
   if log_contains "startIfPossible: denied (no accessibility)." "$log_file"; then
@@ -230,30 +230,30 @@ docktor_startup_failure_reason_from_log() {
   return 1
 }
 
-wait_for_docktor_ready() {
+wait_for_dockmint_ready() {
   local log_file="$1"
-  local timeout_seconds="${2:-$DOCKTOR_START_TIMEOUT_SECONDS}"
+  local timeout_seconds="${2:-$DOCKMINT_START_TIMEOUT_SECONDS}"
   local deadline=$((SECONDS + timeout_seconds))
-  START_DOCKTOR_LAST_ERROR=""
+  START_DOCKMINT_LAST_ERROR=""
 
   while (( SECONDS <= deadline )); do
     local startup_error
-    startup_error="$(docktor_startup_failure_reason_from_log "$log_file" || true)"
+    startup_error="$(dockmint_startup_failure_reason_from_log "$log_file" || true)"
     if [[ -n "$startup_error" ]]; then
-      START_DOCKTOR_LAST_ERROR="$startup_error"
+      START_DOCKMINT_LAST_ERROR="$startup_error"
       return 1
     fi
 
-    if log_contains "$DOCKTOR_READY_LOG_MARKER" "$log_file"; then
+    if log_contains "$DOCKMINT_READY_LOG_MARKER" "$log_file"; then
       return 0
     fi
 
     if [[ -z "${APP_PID:-}" ]] || ! kill -0 "$APP_PID" >/dev/null 2>&1; then
-      startup_error="$(docktor_startup_failure_reason_from_log "$log_file" || true)"
+      startup_error="$(dockmint_startup_failure_reason_from_log "$log_file" || true)"
       if [[ -n "$startup_error" ]]; then
-        START_DOCKTOR_LAST_ERROR="$startup_error (process exited early)"
+        START_DOCKMINT_LAST_ERROR="$startup_error (process exited early)"
       else
-        START_DOCKTOR_LAST_ERROR="process exited before readiness marker '$DOCKTOR_READY_LOG_MARKER'"
+        START_DOCKMINT_LAST_ERROR="process exited before readiness marker '$DOCKMINT_READY_LOG_MARKER'"
       fi
       return 1
     fi
@@ -261,7 +261,7 @@ wait_for_docktor_ready() {
     sleep 0.2
   done
 
-  START_DOCKTOR_LAST_ERROR="timed out after ${timeout_seconds}s waiting for '$DOCKTOR_READY_LOG_MARKER'"
+  START_DOCKMINT_LAST_ERROR="timed out after ${timeout_seconds}s waiting for '$DOCKMINT_READY_LOG_MARKER'"
   return 1
 }
 
@@ -294,39 +294,43 @@ ensure_dock_ready() {
   return 1
 }
 
-ensure_no_docktor() {
-  pkill -x Docktor >/dev/null 2>&1 || true
+ensure_no_dockmint() {
+  pkill -x Dockmint >/dev/null 2>&1 || true
 }
 
-start_docktor() {
+start_dockmint() {
   local log_file="$1"
   shift
 
   require_app_bin
-  stop_docktor
-  ensure_no_docktor
+  stop_dockmint
+  ensure_no_dockmint
   : > "$log_file"
 
-  DOCKTOR_DEBUG_LOG="${DOCKTOR_DEBUG_LOG:-1}" DOCKTOR_TEST_SUITE=1 "$APP_BIN" "$@" >>"$log_file" 2>&1 &
+  DOCKMINT_DEBUG_LOG="${DOCKMINT_DEBUG_LOG:-${DOCKTOR_DEBUG_LOG:-1}}" \
+  DOCKTOR_DEBUG_LOG="${DOCKTOR_DEBUG_LOG:-${DOCKMINT_DEBUG_LOG:-1}}" \
+  DOCKMINT_TEST_SUITE=1 \
+  DOCKTOR_TEST_SUITE=1 \
+  "$APP_BIN" "$@" >>"$log_file" 2>&1 &
   APP_PID=$!
 
-  if ! wait_for_docktor_ready "$log_file"; then
-    echo "error: Docktor failed to become ready: ${START_DOCKTOR_LAST_ERROR:-unknown startup failure}" >&2
+  if ! wait_for_dockmint_ready "$log_file"; then
+    echo "error: Dockmint failed to become ready: ${START_DOCKMINT_LAST_ERROR:-unknown startup failure}" >&2
     print_log_tail "$log_file" 80 >&2
-    stop_docktor
+    stop_dockmint
     return 1
   fi
 }
 
-assert_docktor_alive() {
+assert_dockmint_alive() {
   local log_file="${1:-}"
-  local context="${2:-Docktor process}"
+  local context="${2:-Dockmint process}"
 
   if [[ -z "${APP_PID:-}" ]] || ! kill -0 "$APP_PID" >/dev/null 2>&1; then
     echo "  FAIL: $context exited unexpectedly" >&2
     if [[ -n "$log_file" ]]; then
       local startup_error
-      startup_error="$(docktor_startup_failure_reason_from_log "$log_file" || true)"
+      startup_error="$(dockmint_startup_failure_reason_from_log "$log_file" || true)"
       if [[ -n "$startup_error" ]]; then
         echo "  reason: $startup_error" >&2
       fi
@@ -338,7 +342,7 @@ assert_docktor_alive() {
   return 0
 }
 
-stop_docktor() {
+stop_dockmint() {
   if [[ -n "${APP_PID:-}" ]]; then
     kill "$APP_PID" >/dev/null 2>&1 || true
     wait "$APP_PID" >/dev/null 2>&1 || true
@@ -477,7 +481,7 @@ select_two_dock_test_apps() {
 
     local proc_lc
     proc_lc="$(printf '%s' "$proc" | tr '[:upper:]' '[:lower:]')"
-    if [[ "$proc_lc" == "docktor" || "$proc_lc" == "finder" ]]; then
+    if [[ "$proc_lc" == "dockmint" || "$proc_lc" == "finder" ]]; then
       rejected+=("icon='$icon' process='$proc' reason=excluded-process")
       continue
     fi
@@ -761,7 +765,7 @@ switch_to_space() {
 }
 
 init_artifact_dir() {
-  local prefix="${1:-docktor-artifacts}"
+  local prefix="${1:-dockmint-artifacts}"
   local stamp
   stamp="$(date +%Y%m%d-%H%M%S)"
   TEST_ARTIFACT_DIR="${TEST_ARTIFACT_ROOT%/}/${prefix}-${stamp}"

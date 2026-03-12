@@ -30,7 +30,8 @@ run_stage() {
   return 0
 }
 
-run_stage "xcodebuild test" xcodebuild -project Docktor.xcodeproj -scheme Docktor -configuration Debug test -quiet
+run_stage "xcodebuild test" xcodebuild -project Dockmint.xcodeproj -scheme Dockmint -configuration Debug test -quiet
+run_stage "dockmint migration config validation" python3 ./scripts/release/validate_dockmint_migration.py
 run_stage "decision engine CLI tests" ./scripts/run_decision_engine_tests.sh
 run_stage "automated app expose checks" ./scripts/automated_app_expose_checks.sh
 run_stage "automated default active-app App Exposé double-click stress" ./scripts/automated_default_active_app_expose_double_click.sh

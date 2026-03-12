@@ -15,13 +15,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - channel: stable
-            product_name: Docktor
+          - rename_phase: transition
+            channel: stable
+            product_name: Dockmint
             bundle_id: pzc.Dockter
             app_icon: AppIcon
-          - channel: beta
-            product_name: Docktor Beta
+          - rename_phase: transition
+            channel: beta
+            product_name: Dockmint Beta
             bundle_id: pzc.Dockter.beta
+            app_icon: AppIconBeta
+          - rename_phase: cleanup
+            channel: stable
+            product_name: Dockmint
+            bundle_id: pzc.Dockmint
+            app_icon: AppIcon
+          - rename_phase: cleanup
+            channel: beta
+            product_name: Dockmint Beta
+            bundle_id: pzc.Dockmint.beta
             app_icon: AppIconBeta
     runs-on: macos-15
     steps:
@@ -33,14 +45,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          SOURCE_PACKAGES_DIR="$RUNNER_TEMP/SourcePackages-${{ matrix.channel }}"
+          SOURCE_PACKAGES_DIR="$RUNNER_TEMP/SourcePackages-${{ matrix.rename_phase }}-${{ matrix.channel }}"
           rm -rf "$SOURCE_PACKAGES_DIR"
           mkdir -p "$SOURCE_PACKAGES_DIR"
 
           for attempt in 1 2 3; do
             if xcodebuild \
-              -project Docktor.xcodeproj \
-              -scheme Docktor \
+              -project Dockmint.xcodeproj \
+              -scheme Dockmint \
               -resolvePackageDependencies \
               -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR"; then
               exit 0
@@ -54,18 +66,19 @@ jobs:
             sleep $((attempt * 10))
           done
 
-      - name: Build Docktor (${{ matrix.channel }})
+      - name: Build Dockmint (${{ matrix.rename_phase }} / ${{ matrix.channel }})
         run: |
           set -euo pipefail
-          SOURCE_PACKAGES_DIR="$RUNNER_TEMP/SourcePackages-${{ matrix.channel }}"
+          SOURCE_PACKAGES_DIR="$RUNNER_TEMP/SourcePackages-${{ matrix.rename_phase }}-${{ matrix.channel }}"
           xcodebuild \
-            -project Docktor.xcodeproj \
-            -scheme Docktor \
+            -project Dockmint.xcodeproj \
+            -scheme Dockmint \
             -configuration Release \
             -destination "generic/platform=macOS" \
             -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR" \
             PRODUCT_NAME="${{ matrix.product_name }}" \
             PRODUCT_BUNDLE_IDENTIFIER="${{ matrix.bundle_id }}" \
             ASSETCATALOG_COMPILER_APPICON_NAME="${{ matrix.app_icon }}" \
+            SU_FEED_URL="https://raw.githubusercontent.com/${{ matrix.rename_phase == 'transition' && 'apotenza92/docktor' || 'apotenza92/dockmint' }}/main/appcasts/${{ matrix.channel }}-arm64.xml" \
             CODE_SIGNING_ALLOWED=NO \
             build

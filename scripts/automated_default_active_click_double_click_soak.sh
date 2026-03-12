@@ -17,7 +17,7 @@ SOAK_LONG_QUIT_CYCLES="${SOAK_LONG_QUIT_CYCLES:-1}"
 SOAK_PREFERRED_BUNDLES="${SOAK_PREFERRED_BUNDLES:-com.apple.iCal com.apple.mail com.apple.MobileSMS org.whispersystems.signal-desktop net.whatsapp.WhatsApp com.brave.Browser}"
 
 run_test_preflight true
-init_artifact_dir docktor-e2e-default-active-click-double-click-soak >/dev/null
+init_artifact_dir dockmint-e2e-default-active-click-double-click-soak >/dev/null
 
 LOG_FILE="$(artifact_path soak log)"
 SUMMARY_FILE="$(artifact_path summary txt)"
@@ -75,7 +75,7 @@ restore_dynamic_test_app_candidates() {
 
     local process_name_lc
     process_name_lc="$(printf '%s' "$process_name" | tr '[:upper:]' '[:lower:]')"
-    if [[ "$process_name_lc" == "docktor" || "$process_name_lc" == "finder" ]]; then
+    if [[ "$process_name_lc" == "dockmint" || "$process_name_lc" == "finder" ]]; then
       continue
     fi
 
@@ -106,7 +106,7 @@ collect_candidate_records() {
 
     local process_name_lc
     process_name_lc="$(printf '%s' "$process_name" | tr '[:upper:]' '[:lower:]')"
-    if [[ "$process_name_lc" == "docktor" || "$process_name_lc" == "finder" ]]; then
+    if [[ "$process_name_lc" == "dockmint" || "$process_name_lc" == "finder" ]]; then
       continue
     fi
 

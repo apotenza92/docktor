@@ -49,26 +49,35 @@ fi
 PROJECT_VERSION="$(python3 - <<'PY'
 import re
 from pathlib import Path
-text = Path('Docktor.xcodeproj/project.pbxproj').read_text(encoding='utf-8')
+text = Path('Dockmint.xcodeproj/project.pbxproj').read_text(encoding='utf-8')
 match = re.search(r'MARKETING_VERSION = ([0-9]+\.[0-9]+\.[0-9]+);', text)
 print(match.group(1) if match else '')
 PY
 )"
 
 if [[ "$PROJECT_VERSION" != "$CORE_VERSION" ]]; then
-  echo "Error: Docktor MARKETING_VERSION ($PROJECT_VERSION) must match tag core version ($CORE_VERSION)"
+  echo "Error: Dockmint MARKETING_VERSION ($PROJECT_VERSION) must match tag core version ($CORE_VERSION)"
   exit 1
 fi
 
-if [[ -n "${DOCKTOR_RELEASE_VALIDATION_WAIVER:-}" ]]; then
-  if [[ ! "$DOCKTOR_RELEASE_VALIDATION_WAIVER" =~ (https://github.com/.+/issues/[0-9]+|#[0-9]+) ]]; then
-    echo "Error: DOCKTOR_RELEASE_VALIDATION_WAIVER must reference an issue (e.g. #123 or full GitHub issue URL)"
+VALIDATE_ARGS=()
+if [[ "${DOCKMINT_ALLOW_LEGACY_RELEASE_REPO:-}" != "1" ]]; then
+  VALIDATE_ARGS+=(--require-canonical-origin)
+fi
+
+python3 scripts/release/validate_dockmint_migration.py "${VALIDATE_ARGS[@]}"
+
+RELEASE_VALIDATION_WAIVER="${DOCKMINT_RELEASE_VALIDATION_WAIVER:-${DOCKTOR_RELEASE_VALIDATION_WAIVER:-}}"
+
+if [[ -n "$RELEASE_VALIDATION_WAIVER" ]]; then
+  if [[ ! "$RELEASE_VALIDATION_WAIVER" =~ (https://github.com/.+/issues/[0-9]+|#[0-9]+) ]]; then
+    echo "Error: DOCKMINT_RELEASE_VALIDATION_WAIVER/DOCKTOR_RELEASE_VALIDATION_WAIVER must reference an issue (e.g. #123 or full GitHub issue URL)"
     exit 1
   fi
-  echo "WARNING: skipping required release validation under waiver: $DOCKTOR_RELEASE_VALIDATION_WAIVER"
+  echo "WARNING: skipping required release validation under waiver: $RELEASE_VALIDATION_WAIVER"
 else
   echo "Running required pre-release validation..."
-  xcodebuild -project Docktor.xcodeproj -scheme Docktor -configuration Debug build
+  xcodebuild -project Dockmint.xcodeproj -scheme Dockmint -configuration Debug build
   ./scripts/automated_settings_shell_checks.sh
 fi
 

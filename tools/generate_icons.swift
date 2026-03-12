@@ -38,12 +38,12 @@ let specs: [IconSpec] = [
 ]
 
 let stableTheme = IconTheme(
-    baseTop: NSColor(calibratedRed: 1.00, green: 0.89, blue: 0.46, alpha: 1.0),
-    baseBottom: NSColor(calibratedRed: 0.96, green: 0.44, blue: 0.14, alpha: 1.0),
-    diagonalTop: NSColor(calibratedRed: 1.00, green: 0.96, blue: 0.78, alpha: 0.38),
-    diagonalMid: NSColor(calibratedRed: 1.00, green: 0.68, blue: 0.27, alpha: 0.10),
-    diagonalBottom: NSColor(calibratedRed: 0.86, green: 0.31, blue: 0.09, alpha: 0.22),
-    vignetteBottom: NSColor(calibratedRed: 0.54, green: 0.18, blue: 0.04, alpha: 0.20),
+    baseTop: NSColor(calibratedRed: 0.77, green: 0.98, blue: 0.89, alpha: 1.0),
+    baseBottom: NSColor(calibratedRed: 0.08, green: 0.73, blue: 0.55, alpha: 1.0),
+    diagonalTop: NSColor(calibratedRed: 0.96, green: 1.00, blue: 0.98, alpha: 0.36),
+    diagonalMid: NSColor(calibratedRed: 0.41, green: 0.93, blue: 0.77, alpha: 0.11),
+    diagonalBottom: NSColor(calibratedRed: 0.03, green: 0.53, blue: 0.40, alpha: 0.24),
+    vignetteBottom: NSColor(calibratedRed: 0.02, green: 0.34, blue: 0.25, alpha: 0.20),
     glyphTopAlpha: 0.99,
     glyphBottomAlpha: 0.74
 )
@@ -66,7 +66,7 @@ let iconSets: [IconSet] = [
 
 let fm = FileManager.default
 let cwd = URL(fileURLWithPath: fm.currentDirectoryPath)
-let assetsCatalog = cwd.appendingPathComponent("Docktor/Assets.xcassets", isDirectory: true)
+let assetsCatalog = cwd.appendingPathComponent("Dockmint/Assets.xcassets", isDirectory: true)
 
 func roundedRect(_ rect: NSRect, radius: CGFloat) -> NSBezierPath {
     NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
@@ -80,120 +80,47 @@ func newStrokePath(lineWidth: CGFloat) -> NSBezierPath {
     return path
 }
 
-func drawAirVentGlyph(
-    in rect: NSRect,
-    strokeColor: NSColor,
-    lineWidth: CGFloat,
-    mirroredHorizontally: Bool
-) {
-    NSGraphicsContext.saveGraphicsState()
-
-    let transform = NSAffineTransform()
-    transform.translateX(by: rect.minX, yBy: rect.minY)
-    transform.scaleX(by: rect.width / 24.0, yBy: rect.height / 24.0)
-
-    if mirroredHorizontally {
-        transform.translateX(by: 24.0, yBy: 0.0)
-        transform.scaleX(by: -1.0, yBy: 1.0)
-    }
-
-    transform.concat()
-    strokeColor.setStroke()
-
-    let topBody = newStrokePath(lineWidth: lineWidth)
-    topBody.move(to: NSPoint(x: 6.0, y: 12.0))
-    topBody.line(to: NSPoint(x: 4.0, y: 12.0))
-    topBody.curve(to: NSPoint(x: 2.0, y: 10.0),
-                  controlPoint1: NSPoint(x: 2.9, y: 12.0),
-                  controlPoint2: NSPoint(x: 2.0, y: 11.1))
-    topBody.line(to: NSPoint(x: 2.0, y: 5.0))
-    topBody.curve(to: NSPoint(x: 4.0, y: 3.0),
-                  controlPoint1: NSPoint(x: 2.0, y: 3.9),
-                  controlPoint2: NSPoint(x: 2.9, y: 3.0))
-    topBody.line(to: NSPoint(x: 20.0, y: 3.0))
-    topBody.curve(to: NSPoint(x: 22.0, y: 5.0),
-                  controlPoint1: NSPoint(x: 21.1, y: 3.0),
-                  controlPoint2: NSPoint(x: 22.0, y: 3.9))
-    topBody.line(to: NSPoint(x: 22.0, y: 10.0))
-    topBody.curve(to: NSPoint(x: 20.0, y: 12.0),
-                  controlPoint1: NSPoint(x: 22.0, y: 11.1),
-                  controlPoint2: NSPoint(x: 21.1, y: 12.0))
-    topBody.line(to: NSPoint(x: 18.0, y: 12.0))
-    topBody.stroke()
-
-    let midBar = newStrokePath(lineWidth: lineWidth)
-    midBar.move(to: NSPoint(x: 6.0, y: 8.0))
-    midBar.line(to: NSPoint(x: 18.0, y: 8.0))
-    midBar.stroke()
-
-    let rightOutlet = newStrokePath(lineWidth: lineWidth)
-    rightOutlet.appendArc(withCenter: NSPoint(x: 16.5, y: 19.5),
-                          radius: 2.5,
-                          startAngle: -53.0,
-                          endAngle: 179.0,
-                          clockwise: false)
-    rightOutlet.line(to: NSPoint(x: 14.0, y: 12.0))
-    rightOutlet.stroke()
-
-    let leftOutlet = newStrokePath(lineWidth: lineWidth)
-    leftOutlet.appendArc(withCenter: NSPoint(x: 8.0, y: 17.0),
-                         radius: 2.0,
-                         startAngle: -134.5,
-                         endAngle: 0.0,
-                         clockwise: true)
-    leftOutlet.line(to: NSPoint(x: 10.0, y: 12.0))
-    leftOutlet.stroke()
-
-    NSGraphicsContext.restoreGraphicsState()
+func lucidePoint(_ x: CGFloat, _ y: CGFloat, in rect: NSRect) -> NSPoint {
+    NSPoint(
+        x: rect.minX + rect.width * (x / 24.0),
+        y: rect.minY + rect.height * ((24.0 - y) / 24.0)
+    )
 }
 
-func drawAirVentGlyphVerticalGradient(
+func drawLeafGlyph(
     in rect: NSRect,
-    lineWidth: CGFloat,
-    mirroredHorizontally: Bool,
-    topAlpha: CGFloat,
-    bottomAlpha: CGFloat
+    strokeColor: NSColor,
+    lineWidth: CGFloat
 ) {
-    let maskImage = NSImage(size: rect.size)
-    maskImage.lockFocus()
-    NSColor.clear.setFill()
-    NSRect(origin: .zero, size: rect.size).fill()
-    drawAirVentGlyph(
-        in: NSRect(origin: .zero, size: rect.size),
-        strokeColor: .white,
-        lineWidth: lineWidth,
-        mirroredHorizontally: mirroredHorizontally
-    )
-    maskImage.unlockFocus()
+    strokeColor.setStroke()
+    let strokeWidth = lineWidth * min(rect.width, rect.height) / 24.0
 
-    guard let maskCG = maskImage.cgImage(forProposedRect: nil, context: nil, hints: nil),
-          let ctx = NSGraphicsContext.current?.cgContext,
-          let gradient = CGGradient(
-              colorsSpace: CGColorSpaceCreateDeviceRGB(),
-              colors: [
-                  NSColor(calibratedWhite: 1.0, alpha: topAlpha).cgColor,
-                  NSColor(calibratedWhite: 1.0, alpha: bottomAlpha).cgColor
-              ] as CFArray,
-              locations: [0.0, 1.0]
-          ) else {
-        drawAirVentGlyph(
-            in: rect,
-            strokeColor: NSColor(calibratedWhite: 1.0, alpha: bottomAlpha),
-            lineWidth: lineWidth,
-            mirroredHorizontally: mirroredHorizontally
-        )
-        return
-    }
+    let leaf = newStrokePath(lineWidth: strokeWidth)
+    leaf.move(to: lucidePoint(11.0, 20.0, in: rect))
+    leaf.curve(to: lucidePoint(9.8, 6.1, in: rect),
+               controlPoint1: lucidePoint(7.2, 18.0, in: rect),
+               controlPoint2: lucidePoint(6.9, 9.7, in: rect))
+    leaf.curve(to: lucidePoint(19.0, 2.0, in: rect),
+               controlPoint1: lucidePoint(15.5, 5.0, in: rect),
+               controlPoint2: lucidePoint(17.0, 4.48, in: rect))
+    leaf.curve(to: lucidePoint(21.0, 10.0, in: rect),
+               controlPoint1: lucidePoint(20.0, 4.0, in: rect),
+               controlPoint2: lucidePoint(21.0, 6.18, in: rect))
+    leaf.curve(to: lucidePoint(11.0, 20.0, in: rect),
+               controlPoint1: lucidePoint(21.0, 15.5, in: rect),
+               controlPoint2: lucidePoint(16.22, 20.0, in: rect))
+    leaf.close()
+    leaf.stroke()
 
-    ctx.saveGState()
-    ctx.clip(to: rect, mask: maskCG)
-    ctx.drawLinearGradient(
-        gradient,
-        start: CGPoint(x: rect.midX, y: rect.maxY),
-        end: CGPoint(x: rect.midX, y: rect.minY),
-        options: []
-    )
-    ctx.restoreGState()
+    let vein = newStrokePath(lineWidth: strokeWidth)
+    vein.move(to: lucidePoint(2.0, 21.0, in: rect))
+    vein.curve(to: lucidePoint(7.08, 15.0, in: rect),
+               controlPoint1: lucidePoint(2.0, 18.0, in: rect),
+               controlPoint2: lucidePoint(3.85, 15.64, in: rect))
+    vein.curve(to: lucidePoint(13.0, 12.0, in: rect),
+               controlPoint1: lucidePoint(9.5, 14.52, in: rect),
+               controlPoint2: lucidePoint(12.0, 13.0, in: rect))
+    vein.stroke()
 }
 
 func drawIcon(size: Int, theme: IconTheme) -> NSImage {
@@ -233,15 +160,12 @@ func drawIcon(size: Int, theme: IconTheme) -> NSImage {
 
     NSGraphicsContext.restoreGraphicsState()
 
-    var glyphRect = outerRect.insetBy(dx: s * 0.10, dy: s * 0.10)
-    glyphRect.origin.y += s * 0.004
+    let glyphRect = outerRect.insetBy(dx: s * 0.10, dy: s * 0.10)
 
-    drawAirVentGlyphVerticalGradient(
+    drawLeafGlyph(
         in: glyphRect,
-        lineWidth: 1.9,
-        mirroredHorizontally: true,
-        topAlpha: theme.glyphTopAlpha,
-        bottomAlpha: theme.glyphBottomAlpha
+        strokeColor: NSColor(calibratedWhite: 1.0, alpha: theme.glyphTopAlpha),
+        lineWidth: 2.0
     )
 
     return image
@@ -251,7 +175,7 @@ func writePNG(_ image: NSImage, to url: URL) throws {
     guard let tiff = image.tiffRepresentation,
           let rep = NSBitmapImageRep(data: tiff),
           let data = rep.representation(using: .png, properties: [:]) else {
-        throw NSError(domain: "DocktorIcon", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode PNG"])
+        throw NSError(domain: "DockmintIcon", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode PNG"])
     }
     try data.write(to: url, options: .atomic)
 }

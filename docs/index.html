@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Download Docktor for macOS. Choose stable or beta, install with Homebrew, or download the latest zip for Apple Silicon and Intel Macs."
+      content="Download Dockmint for macOS. Choose stable or beta, install with Homebrew, or download the latest zip for Apple Silicon and Intel Macs."
     />
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/png" href="./icon.png" />
-    <title>Download Docktor</title>
+    <title>Download Dockmint</title>
     <style>
       * {
         margin: 0;
@@ -30,11 +30,11 @@
         --text-muted: #666;
         --text-subtle: #888;
         --border: #e0e0e0;
-        --stable-accent: #f0a050;
-        --stable-accent-hover: #e08030;
-        --stable-accent-soft: rgba(240, 160, 80, 0.14);
-        --stable-accent-border: rgba(240, 160, 80, 0.34);
-        --stable-accent-glow: rgba(240, 160, 80, 0.5);
+        --stable-accent: #23c48e;
+        --stable-accent-hover: #17a977;
+        --stable-accent-soft: rgba(35, 196, 142, 0.14);
+        --stable-accent-border: rgba(35, 196, 142, 0.34);
+        --stable-accent-glow: rgba(35, 196, 142, 0.5);
         --beta-accent: #7080d0;
         --beta-accent-hover: #5060c0;
         --beta-accent-soft: rgba(112, 128, 208, 0.14);
@@ -46,8 +46,8 @@
         --channel-accent-border: var(--stable-accent-border);
         --channel-accent-glow: var(--stable-accent-glow);
         --selection-gap: 2rem;
-        --btn-shadow: rgba(240, 160, 80, 0.25);
-        --btn-shadow-hover: rgba(240, 160, 80, 0.35);
+        --btn-shadow: rgba(35, 196, 142, 0.25);
+        --btn-shadow-hover: rgba(35, 196, 142, 0.35);
         --code-bg: #f4f4f4;
       }
 
@@ -64,8 +64,8 @@
           --text-muted: #888;
           --text-subtle: #666;
           --border: #333;
-          --btn-shadow: rgba(240, 160, 80, 0.3);
-          --btn-shadow-hover: rgba(240, 160, 80, 0.4);
+          --btn-shadow: rgba(35, 196, 142, 0.3);
+          --btn-shadow-hover: rgba(35, 196, 142, 0.4);
           --code-bg: #1a1a1a;
         }
 
@@ -692,10 +692,10 @@
   </head>
   <body>
     <div class="container">
-      <img src="./icon.png" alt="Docktor" class="icon" id="app-icon" />
-      <h1 id="app-title">Docktor</h1>
+      <img src="./icon.png" alt="Dockmint" class="icon" id="app-icon" />
+      <h1 id="app-title">Dockmint</h1>
       <p class="intro-copy" style="margin-top: 1rem; margin-bottom: 0.75rem">
-        Docktor is a free open source macOS app to customize Dock icon click,
+        Dockmint is a free open source macOS app to customize Dock icon click,
         double-click, and scroll actions.
       </p>
 
@@ -706,7 +706,7 @@
       </p>
 
       <p class="intro-copy" id="meta-note" style="margin-top: 0; margin-bottom: 2rem">
-        Docktor ships with double click mapped to App Exposé, so double
+        Dockmint ships with double click mapped to App Exposé, so double
         clicking a Dock icon shows all open windows for that app.
       </p>
 
@@ -749,7 +749,7 @@
               <div class="format-command">
                 <code id="mac-homebrew-code"
                   >brew tap apotenza92/tap
-brew install --cask apotenza92/tap/docktor</code
+brew install --cask apotenza92/tap/dockmint</code
                 >
                 <div
                   class="copy-btn"
@@ -776,7 +776,7 @@ brew install --cask apotenza92/tap/docktor</code
 
       <div class="github-button-row">
         <a
-          href="https://github.com/apotenza92/docktor"
+          href="https://github.com/apotenza92/dockmint"
           class="github-icon-link"
           title="View on GitHub"
         >
@@ -920,7 +920,7 @@ brew install --cask apotenza92/tap/docktor</code
         }
       }
 
-      const repo = "apotenza92/docktor";
+      const repo = "apotenza92/dockmint";
       let currentChannel = "stable";
       let currentMacArch = "arm64";
       let releaseModel = null;
@@ -1128,8 +1128,8 @@ brew install --cask apotenza92/tap/docktor</code
         const version = shortVersion(release.parsed);
         const name =
           channel === "beta"
-            ? `Docktor-Beta-v${version}-macos-${arch}.zip`
-            : `Docktor-v${version}-macos-${arch}.zip`;
+            ? `Dockmint-Beta-v${version}-macos-${arch}.zip`
+            : `Dockmint-v${version}-macos-${arch}.zip`;
         return release.assets.find((asset) => asset.name === name) || null;
       }
 
@@ -1150,8 +1150,8 @@ brew install --cask apotenza92/tap/docktor</code
 
       function getHomebrewCommand() {
         return currentChannel === "beta"
-          ? "brew tap apotenza92/tap\nbrew install --cask apotenza92/tap/docktor@beta"
-          : "brew tap apotenza92/tap\nbrew install --cask apotenza92/tap/docktor";
+          ? "brew tap apotenza92/tap\nbrew install --cask apotenza92/tap/dockmint@beta"
+          : "brew tap apotenza92/tap\nbrew install --cask apotenza92/tap/dockmint";
       }
 
       function copyIconSvg() {
@@ -1228,7 +1228,7 @@ brew install --cask apotenza92/tap/docktor</code
         const code = document.getElementById("mac-homebrew-code");
 
         if (currentChannel === "beta") {
-          label.textContent = "Or install Docktor Beta via Homebrew:";
+          label.textContent = "Or install Dockmint Beta via Homebrew:";
         } else {
           label.textContent = "Or install via Homebrew:";
         }
@@ -1254,7 +1254,7 @@ brew install --cask apotenza92/tap/docktor</code
         intelBtn.classList.toggle("active", currentMacArch === "x64");
         document.body.classList.toggle("beta-mode", currentChannel === "beta");
 
-        const appName = currentChannel === "beta" ? "Docktor Beta" : "Docktor";
+        const appName = currentChannel === "beta" ? "Dockmint Beta" : "Dockmint";
         appTitle.textContent = appName;
         appIcon.src = currentChannel === "beta" ? "./beta-icon.png" : "./icon.png";
         appIcon.alt = appName;

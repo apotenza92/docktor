@@ -12,14 +12,14 @@ POLL_SLEEP_SECONDS="${POLL_SLEEP_SECONDS:-0.15}"
 DOCK_AUTOHIDE="${DOCK_AUTOHIDE:-false}"
 
 LOG_FILE=""
-DOCKTOR_LOG_FILE=""
+DOCKMINT_LOG_FILE=""
 PREF_BACKUP=""
 
 run_test_preflight true
-init_artifact_dir docktor-e2e-modifier-toggle >/dev/null
+init_artifact_dir dockmint-e2e-modifier-toggle >/dev/null
 
 LOG_FILE="$(artifact_path modifier-toggle log)"
-DOCKTOR_LOG_FILE="$(artifact_path docktor log)"
+DOCKMINT_LOG_FILE="$(artifact_path dockmint log)"
 PREF_BACKUP="$(artifact_path preferences-backup plist)"
 : >"$LOG_FILE"
 
@@ -36,8 +36,8 @@ restore_preferences() {
 }
 
 cleanup() {
-  stop_docktor
-  ensure_no_docktor >/dev/null 2>&1 || true
+  stop_dockmint
+  ensure_no_dockmint >/dev/null 2>&1 || true
   restore_preferences "$PREF_BACKUP"
   restore_dock_state >/dev/null 2>&1 || true
 }
@@ -109,11 +109,11 @@ configure_shift_actions() {
   write_pref_string shiftOptionClickAction none
 }
 
-restart_docktor_with_current_prefs() {
-  stop_docktor
-  : >"$DOCKTOR_LOG_FILE"
-  start_docktor "$DOCKTOR_LOG_FILE"
-  assert_docktor_alive "$DOCKTOR_LOG_FILE" "modifier toggle checks"
+restart_dockmint_with_current_prefs() {
+  stop_dockmint
+  : >"$DOCKMINT_LOG_FILE"
+  start_dockmint "$DOCKMINT_LOG_FILE"
+  assert_dockmint_alive "$DOCKMINT_LOG_FILE" "modifier toggle checks"
 }
 
 shift_click_icon() {
@@ -150,7 +150,7 @@ run_separated_toggle_case() {
   echo "scenario=$label type=separated action=$action" >>"$LOG_FILE"
 
   configure_shift_actions "$action"
-  restart_docktor_with_current_prefs
+  restart_dockmint_with_current_prefs
   ensure_targets_ready
   activate_finder
 
@@ -206,12 +206,12 @@ run_double_click_toggle_case() {
   echo "scenario=$label type=doubleClick action=$action" >>"$LOG_FILE"
 
   configure_shift_actions "$action"
-  restart_docktor_with_current_prefs
+  restart_dockmint_with_current_prefs
   ensure_targets_ready
   activate_finder
 
-  before_deferred="$(count_log_matches "source=firstClickModifierDeferred" "$DOCKTOR_LOG_FILE")"
-  before_second_action="$(count_log_matches ": ${action} for ${TEST_BUNDLE_A} (modifiers=shift" "$DOCKTOR_LOG_FILE")"
+  before_deferred="$(count_log_matches "source=firstClickModifierDeferred" "$DOCKMINT_LOG_FILE")"
+  before_second_action="$(count_log_matches ": ${action} for ${TEST_BUNDLE_A} (modifiers=shift" "$DOCKMINT_LOG_FILE")"
   before_target_visible="$(process_visible "$TEST_PROCESS_A")"
 
   shift_double_click_icon "$TEST_DOCK_ICON_A"
@@ -234,8 +234,8 @@ run_double_click_toggle_case() {
       ;;
   esac
 
-  after_deferred="$(count_log_matches "source=firstClickModifierDeferred" "$DOCKTOR_LOG_FILE")"
-  after_second_action="$(count_log_matches ": ${action} for ${TEST_BUNDLE_A} (modifiers=shift" "$DOCKTOR_LOG_FILE")"
+  after_deferred="$(count_log_matches "source=firstClickModifierDeferred" "$DOCKMINT_LOG_FILE")"
+  after_second_action="$(count_log_matches ": ${action} for ${TEST_BUNDLE_A} (modifiers=shift" "$DOCKMINT_LOG_FILE")"
   after_target_visible="$(process_visible "$TEST_PROCESS_A")"
 
   if (( after_deferred - before_deferred < 1 )); then

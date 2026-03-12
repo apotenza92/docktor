@@ -1,21 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
-    <title>Docktor Beta Updates</title>
-    <description>Docktor update feed (beta channel)</description>
+    <title>Dockmint Beta Updates</title>
+    <description>Dockmint update feed (beta channel)</description>
     <language>en</language>
     <item>
       <title>Version 0.2.1</title>
-      <link>https://github.com/apotenza92/docktor/releases/tag/v0.2.1</link>
+      <link>https://github.com/apotenza92/dockmint/releases/tag/v0.2.1</link>
       <sparkle:version>200190000</sparkle:version>
       <sparkle:shortVersionString>0.2.1</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <sparkle:fullReleaseNotesLink>https://github.com/apotenza92/docktor/blob/main/CHANGELOG.md</sparkle:fullReleaseNotesLink>
+      <sparkle:fullReleaseNotesLink>https://github.com/apotenza92/dockmint/blob/main/CHANGELOG.md</sparkle:fullReleaseNotesLink>
       <description sparkle:format="plain-text"><![CDATA[- Polished the single-window Settings layout with tighter top-column balancing, clearer section hierarchy, compact permissions rows, and action-table sizing tweaks that remove truncation in common controls.
 - Cleaned up update messaging in Settings by showing the short version only and mapping Sparkle "no update found" and cancelled checks to user-friendly status text.
 - Restricted duplicate-instance termination to Debug builds so release builds no longer interfere with Sparkle relaunch/update flows.]]></description>
       <pubDate>Thu, 12 Mar 2026 02:03:08 +0000</pubDate>
-      <enclosure url="https://github.com/apotenza92/docktor/releases/download/v0.2.1/Docktor-Beta-v0.2.1-macos-x64.zip"
+      <enclosure url="https://github.com/apotenza92/dockmint/releases/download/v0.2.1/Dockmint-Beta-v0.2.1-macos-x64.zip"
                  sparkle:edSignature="/JC1K8xpME+6xThr2326AIjU8qnJwwKjslbbxWJl/A8+HhL43tt0waMUzSENxSn1QXHmqzVzqtfTrTFjqc4fBA=="
                  length="2803086"
                  type="application/octet-stream" />

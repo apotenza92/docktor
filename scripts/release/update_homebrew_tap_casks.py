@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Update Docktor Homebrew casks in apotenza92/homebrew-tap.
+"""Update Dockmint Homebrew casks in apotenza92/homebrew-tap.
 
 Policy:
 - Stable cask tracks latest stable tag (vX.Y.Z).
 - Beta cask tracks whichever is newer between latest stable and latest prerelease.
   This keeps beta-channel users moving forward even when stable surpasses beta.
-- Beta artifacts install side-by-side as Docktor Beta.app.
+- Beta artifacts install side-by-side as Dockmint Beta.app.
 """
 
 from __future__ import annotations
@@ -114,7 +114,7 @@ def fetch_releases(repo: str, github_token: str | None) -> list[Release]:
     req = urllib.request.Request(
         url,
         headers=build_api_headers(
-            user_agent="docktor-homebrew-sync", github_token=github_token
+            user_agent="dockmint-homebrew-sync", github_token=github_token
         ),
     )
 
@@ -187,7 +187,7 @@ def sha256_for_asset(
     request = urllib.request.Request(
         asset.download_url,
         headers=build_api_headers(
-            user_agent="docktor-homebrew-sha256", github_token=github_token
+            user_agent="dockmint-homebrew-sha256", github_token=github_token
         )
         | {"Accept": "application/octet-stream"},
     )
@@ -205,6 +205,9 @@ def sha256_for_asset(
 
 
 def render_stable_cask(
+    token: str,
+    name: str,
+    desc: str,
     repo: str,
     version: str,
     arm_url: str,
@@ -212,7 +215,7 @@ def render_stable_cask(
     intel_url: str,
     intel_sha256: str,
 ) -> str:
-    return f'''cask "docktor" do
+    return f'''cask "{token}" do
   version "{version}"
 
   on_arm do
@@ -225,8 +228,8 @@ def render_stable_cask(
     sha256 "{intel_sha256}"
   end
 
-  name "Docktor"
-  desc "Dock gesture actions for macOS"
+  name "{name}"
+  desc "{desc}"
   homepage "https://github.com/{repo}"
 
   livecheck do
@@ -234,19 +237,26 @@ def render_stable_cask(
     strategy :github_latest
   end
 
-  app "Docktor.app"
+  app "Dockmint.app"
 
   zap trash: [
+    "~/Library/Application Support/Dockmint",
     "~/Library/Application Support/Docktor",
     "~/Library/Caches/pzc.Dockter",
+    "~/Library/Caches/pzc.Dockmint",
     "~/Library/Preferences/pzc.Dockter.plist",
+    "~/Library/Preferences/pzc.Dockmint.plist",
     "~/Library/Saved Application State/pzc.Dockter.savedState",
+    "~/Library/Saved Application State/pzc.Dockmint.savedState",
   ]
 end
 '''
 
 
 def render_beta_cask(
+    token: str,
+    name: str,
+    desc: str,
     repo: str,
     version: str,
     arm_url: str,
@@ -254,7 +264,7 @@ def render_beta_cask(
     intel_url: str,
     intel_sha256: str,
 ) -> str:
-    return f'''cask "docktor@beta" do
+    return f'''cask "{token}" do
   version "{version}"
 
   on_arm do
@@ -267,8 +277,8 @@ def render_beta_cask(
     sha256 "{intel_sha256}"
   end
 
-  name "Docktor Beta"
-  desc "Beta channel for Docktor"
+  name "{name}"
+  desc "{desc}"
   homepage "https://github.com/{repo}"
 
   livecheck do
@@ -280,13 +290,17 @@ def render_beta_cask(
     end
   end
 
-  app "Docktor Beta.app"
+  app "Dockmint Beta.app"
 
   zap trash: [
+    "~/Library/Application Support/Dockmint Beta",
     "~/Library/Application Support/Docktor Beta",
     "~/Library/Caches/pzc.Dockter.beta",
+    "~/Library/Caches/pzc.Dockmint.beta",
     "~/Library/Preferences/pzc.Dockter.beta.plist",
+    "~/Library/Preferences/pzc.Dockmint.beta.plist",
     "~/Library/Saved Application State/pzc.Dockter.beta.savedState",
+    "~/Library/Saved Application State/pzc.Dockmint.beta.savedState",
   ]
 end
 '''
@@ -310,13 +324,19 @@ def main() -> int:
     )
     parser.add_argument(
         "--repo",
-        default="apotenza92/docktor",
+        default="apotenza92/dockmint",
         help="GitHub repository owner/name",
     )
     parser.add_argument(
         "--github-token",
         default=os.environ.get("GITHUB_TOKEN", "").strip() or None,
         help="GitHub token for API and asset download requests (defaults to GITHUB_TOKEN env var)",
+    )
+    parser.add_argument(
+        "--legacy-alias-mode",
+        choices=("keep", "remove"),
+        default=os.environ.get("DOCKMINT_LEGACY_HOMEBREW_ALIAS_MODE", "keep"),
+        help="Whether to keep or remove legacy docktor Homebrew alias casks",
     )
     args = parser.parse_args()
 
@@ -349,8 +369,8 @@ def main() -> int:
     stable_changed = False
     if stable is not None:
         stable_version = version_string(stable.parsed)
-        stable_arm_name = f"Docktor-v{stable_version}-macos-arm64.zip"
-        stable_intel_name = f"Docktor-v{stable_version}-macos-x64.zip"
+        stable_arm_name = f"Dockmint-v{stable_version}-macos-arm64.zip"
+        stable_intel_name = f"Dockmint-v{stable_version}-macos-x64.zip"
         stable_arm_asset = find_asset(stable, stable_arm_name)
         stable_intel_asset = find_asset(stable, stable_intel_name)
         stable_arm_sha = sha256_for_asset(
@@ -360,8 +380,11 @@ def main() -> int:
             stable_intel_asset, github_token=args.github_token, cache=sha_cache
         )
         stable_changed = write_if_changed(
-            casks_dir / "docktor.rb",
+            casks_dir / "dockmint.rb",
             render_stable_cask(
+                "dockmint",
+                "Dockmint",
+                "Dock gesture actions for macOS",
                 args.repo,
                 stable_version,
                 stable_arm_asset.download_url,
@@ -370,6 +393,24 @@ def main() -> int:
                 stable_intel_sha,
             ),
         )
+        legacy_stable_path = casks_dir / "docktor.rb"
+        if args.legacy_alias_mode == "keep":
+            write_if_changed(
+                legacy_stable_path,
+                render_stable_cask(
+                    "docktor",
+                    "Dockmint",
+                    "Legacy alias for Dockmint",
+                    args.repo,
+                    stable_version,
+                    stable_arm_asset.download_url,
+                    stable_arm_sha,
+                    stable_intel_asset.download_url,
+                    stable_intel_sha,
+                ),
+            )
+        elif legacy_stable_path.exists():
+            legacy_stable_path.unlink()
         print(
             f"Stable cask -> {stable_version} ({'updated' if stable_changed else 'unchanged'})"
         )
@@ -377,8 +418,8 @@ def main() -> int:
         print("Stable cask unchanged (no stable releases yet)")
 
     beta_version = version_string(beta_track.parsed)
-    beta_arm_name = f"Docktor-Beta-v{beta_version}-macos-arm64.zip"
-    beta_intel_name = f"Docktor-Beta-v{beta_version}-macos-x64.zip"
+    beta_arm_name = f"Dockmint-Beta-v{beta_version}-macos-arm64.zip"
+    beta_intel_name = f"Dockmint-Beta-v{beta_version}-macos-x64.zip"
     beta_arm_asset = find_asset(beta_track, beta_arm_name)
     beta_intel_asset = find_asset(beta_track, beta_intel_name)
     beta_arm_sha = sha256_for_asset(
@@ -388,8 +429,11 @@ def main() -> int:
         beta_intel_asset, github_token=args.github_token, cache=sha_cache
     )
     beta_changed = write_if_changed(
-        casks_dir / "docktor@beta.rb",
+        casks_dir / "dockmint@beta.rb",
         render_beta_cask(
+            "dockmint@beta",
+            "Dockmint Beta",
+            "Beta channel for Dockmint",
             args.repo,
             beta_version,
             beta_arm_asset.download_url,
@@ -398,6 +442,24 @@ def main() -> int:
             beta_intel_sha,
         ),
     )
+    legacy_beta_path = casks_dir / "docktor@beta.rb"
+    if args.legacy_alias_mode == "keep":
+        write_if_changed(
+            legacy_beta_path,
+            render_beta_cask(
+                "docktor@beta",
+                "Dockmint Beta",
+                "Legacy beta alias for Dockmint",
+                args.repo,
+                beta_version,
+                beta_arm_asset.download_url,
+                beta_arm_sha,
+                beta_intel_asset.download_url,
+                beta_intel_sha,
+            ),
+        )
+    elif legacy_beta_path.exists():
+        legacy_beta_path.unlink()
     print(f"Beta cask -> {beta_version} ({'updated' if beta_changed else 'unchanged'})")
 
     return 0

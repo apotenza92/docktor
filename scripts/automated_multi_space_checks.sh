@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/test_common.sh"
 
-# Local-only regression harness for Docktor active-app second-click behavior when
+# Local-only regression harness for Dockmint active-app second-click behavior when
 # the target app has windows spread across multiple Spaces.
 #
 # Required desktop layout before running:
@@ -19,7 +19,7 @@ source "$SCRIPT_DIR/lib/test_common.sh"
 #   MULTI_SPACE_CONTROL_SPACE=1
 #   MULTI_SPACE_APP_SPACE_A=2
 #   MULTI_SPACE_APP_SPACE_B=3
-#   TEST_ARTIFACT_ROOT=/tmp/docktor-artifacts
+#   TEST_ARTIFACT_ROOT=/tmp/dockmint-artifacts
 
 LOG_FILE=""
 RUN_LOG_FILE=""
@@ -63,16 +63,16 @@ merge_current_log() {
   CURRENT_LOG_MERGED=true
 }
 
-restart_docktor_for_scenario() {
+restart_dockmint_for_scenario() {
   local scenario_label="$1"
   merge_current_log
-  stop_docktor
-  LOG_FILE="$(artifact_path "${scenario_label}-docktor" "log")"
+  stop_dockmint
+  LOG_FILE="$(artifact_path "${scenario_label}-dockmint" "log")"
   CURRENT_LOG_LABEL="$scenario_label"
   CURRENT_LOG_MERGED=false
-  append_note "docktor_log_${scenario_label}=$LOG_FILE"
-  start_docktor "$LOG_FILE"
-  assert_docktor_alive "$LOG_FILE" "${scenario_label} Docktor process"
+  append_note "dockmint_log_${scenario_label}=$LOG_FILE"
+  start_dockmint "$LOG_FILE"
+  assert_dockmint_alive "$LOG_FILE" "${scenario_label} Dockmint process"
 }
 
 log_match_count() {
@@ -248,7 +248,7 @@ prepare_second_click_scenario() {
   write_pref_string firstClickBehavior activateApp
   write_pref_string clickAction "$action"
   write_pref_bool clickAppExposeRequiresMultipleWindows false
-  restart_docktor_for_scenario "$scenario_id"
+  restart_dockmint_for_scenario "$scenario_id"
   switch_to_control_space
   capture_target_snapshot "${scenario_id}-before"
 
@@ -271,15 +271,15 @@ perform_second_click_capture() {
 
   dock_click "$TEST_MULTI_SPACE_TARGET_DOCK_ICON"
   sleep 0.4
-  if ! assert_docktor_alive "$LOG_FILE" "${scenario_id} after second click (immediate)"; then
-    scenario_fail "Docktor exited unexpectedly immediately after second click"
+  if ! assert_dockmint_alive "$LOG_FILE" "${scenario_id} after second click (immediate)"; then
+    scenario_fail "Dockmint exited unexpectedly immediately after second click"
   fi
   capture_target_snapshot "${scenario_id}-after-second-immediate"
   capture_dock_snapshot "${scenario_id}-after-second-immediate" >/dev/null
 
   sleep "$settle_seconds"
-  if ! assert_docktor_alive "$LOG_FILE" "${scenario_id} after second click (settle)"; then
-    scenario_fail "Docktor exited unexpectedly after second-click settle"
+  if ! assert_dockmint_alive "$LOG_FILE" "${scenario_id} after second click (settle)"; then
+    scenario_fail "Dockmint exited unexpectedly after second-click settle"
   fi
   capture_target_snapshot "${scenario_id}-after-second-settle"
   capture_dock_snapshot "${scenario_id}-after-second-settle" >/dev/null
@@ -299,13 +299,13 @@ Artifacts live in: $TEST_ARTIFACT_DIR
 
 ## Current-Space / Manual Scenarios
 - Review \`scenario-none-after-second-settle-screen.png\` and \`scenario-activateApp-after-second-settle-screen.png\`.
-- Confirm Docktor did not programmatically switch Spaces for those second clicks.
+- Confirm Dockmint did not programmatically switch Spaces for those second clicks.
 - Review \`scenario-appExpose-after-second-immediate-screen.png\` and \`scenario-appExpose-after-second-settle-dock-icon.png\`.
 - Confirm App Exposé opened and the Dock icon was not left greyed out or visually pressed after settle.
 
 ## AX-Visible Window Scenarios
 - Review \`scenario-bringAllToFront-after-second-settle-screen.png\`, \`scenario-minimizeAll-after-second-settle-screen.png\`, and the Space 2 / Space 3 screenshots for those scenarios.
-- Treat these as AX-visible-only checks: if a window remains visible on another Space while missing from AX summaries, record it as an AX limitation rather than a Docktor failure.
+- Treat these as AX-visible-only checks: if a window remains visible on another Space while missing from AX summaries, record it as an AX limitation rather than a Dockmint failure.
 - Review \`scenario-minimizeAll-restore-attempt1-screen.png\` and, if present, \`scenario-minimizeAll-restore-attempt2-screen.png\`.
 - Confirm the restore path returns the target app's current AX-visible standard windows without requiring manual intervention.
 
@@ -324,8 +324,8 @@ cleanup() {
     fi
   fi
   merge_current_log
-  stop_docktor
-  ensure_no_docktor
+  stop_dockmint
+  ensure_no_dockmint
   restore_dock_state
   if [[ -n "${PREF_BACKUP:-}" ]]; then
     restore_preferences "$PREF_BACKUP"
@@ -454,8 +454,8 @@ run_scenario_minimize_all() {
   for attempt in 1 2; do
     dock_click "$TEST_MULTI_SPACE_TARGET_DOCK_ICON"
     sleep 1.0
-    if ! assert_docktor_alive "$LOG_FILE" "${CURRENT_SCENARIO_ID} restore attempt $attempt"; then
-      scenario_fail "Docktor exited during minimizeAll restore attempt $attempt"
+    if ! assert_dockmint_alive "$LOG_FILE" "${CURRENT_SCENARIO_ID} restore attempt $attempt"; then
+      scenario_fail "Dockmint exited during minimizeAll restore attempt $attempt"
     fi
     capture_target_snapshot "${CURRENT_SCENARIO_ID}-restore-attempt${attempt}"
     restore_summary="${TEST_ARTIFACT_DIR}/${CURRENT_SCENARIO_ID}-restore-attempt${attempt}-ax.txt"
@@ -548,12 +548,12 @@ run_scenario_quit_app() {
 echo "== multi-space regression checks =="
 run_test_preflight true
 capture_dock_state
-init_artifact_dir "docktor-multi-space" >/dev/null
-RUN_LOG_FILE="$(artifact_path "docktor-run" "log")"
+init_artifact_dir "dockmint-multi-space" >/dev/null
+RUN_LOG_FILE="$(artifact_path "dockmint-run" "log")"
 : >"$RUN_LOG_FILE"
 LOG_FILE=""
 ARTIFACT_NOTES="$(artifact_path "NOTES" "txt")"
-PREF_BACKUP="$(artifact_path "docktor-preferences" "plist")"
+PREF_BACKUP="$(artifact_path "dockmint-preferences" "plist")"
 backup_preferences "$PREF_BACKUP"
 validate_multi_space_preconditions
 

@@ -10,6 +10,36 @@ on:
         description: "Tag to release (example: v1.0.0 or v1.0.0-beta.1)"
         required: true
         type: string
+      rename_phase:
+        description: "Release phase for the Docktor -> Dockmint migration"
+        required: false
+        default: transition
+        type: choice
+        options:
+          - transition
+          - cleanup
+      legacy_feed_repo:
+        description: "Optional legacy repo that should continue hosting Sparkle appcasts during transition"
+        required: false
+        type: string
+      publish_legacy_appcasts:
+        description: "Override legacy Sparkle appcast mirroring for this release"
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - "true"
+          - "false"
+      legacy_homebrew_alias_mode:
+        description: "Override whether legacy Docktor Homebrew aliases are kept or removed"
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - keep
+          - remove
 
 permissions:
   contents: write
@@ -23,6 +53,13 @@ jobs:
       version_core: ${{ steps.meta.outputs.version_core }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
       build_number: ${{ steps.meta.outputs.build_number }}
+      rename_phase: ${{ steps.meta.outputs.rename_phase }}
+      stable_bundle_id: ${{ steps.meta.outputs.stable_bundle_id }}
+      beta_bundle_id: ${{ steps.meta.outputs.beta_bundle_id }}
+      feed_repo: ${{ steps.meta.outputs.feed_repo }}
+      legacy_feed_repo: ${{ steps.meta.outputs.legacy_feed_repo }}
+      publish_legacy_appcasts: ${{ steps.meta.outputs.publish_legacy_appcasts }}
+      legacy_homebrew_alias_mode: ${{ steps.meta.outputs.legacy_homebrew_alias_mode }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,6 +67,16 @@ jobs:
       - name: Parse tag metadata
         id: meta
         shell: bash
+        env:
+          INPUT_RENAME_PHASE: ${{ inputs.rename_phase }}
+          INPUT_LEGACY_FEED_REPO: ${{ inputs.legacy_feed_repo }}
+          INPUT_PUBLISH_LEGACY_APPCASTS: ${{ inputs.publish_legacy_appcasts }}
+          INPUT_LEGACY_HOMEBREW_ALIAS_MODE: ${{ inputs.legacy_homebrew_alias_mode }}
+          VAR_RENAME_PHASE: ${{ vars.DOCKMINT_RENAME_PHASE }}
+          VAR_LEGACY_FEED_REPO: ${{ vars.DOCKMINT_LEGACY_FEED_REPO }}
+          VAR_PUBLISH_LEGACY_APPCASTS: ${{ vars.DOCKMINT_PUBLISH_LEGACY_APPCASTS }}
+          VAR_LEGACY_HOMEBREW_ALIAS_MODE: ${{ vars.DOCKMINT_LEGACY_HOMEBREW_ALIAS_MODE }}
+          CURRENT_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
 
@@ -52,7 +99,7 @@ jobs:
             exit 1
           fi
 
-          PROJECT_VERSION="$(python3 -c 'import re, pathlib; text = pathlib.Path("Docktor.xcodeproj/project.pbxproj").read_text(encoding="utf-8"); m = re.search(r"MARKETING_VERSION = ([0-9]+\.[0-9]+\.[0-9]+);", text); print(m.group(1) if m else "")')"
+          PROJECT_VERSION="$(python3 -c 'import re, pathlib; text = pathlib.Path("Dockmint.xcodeproj/project.pbxproj").read_text(encoding="utf-8"); m = re.search(r"MARKETING_VERSION = ([0-9]+\.[0-9]+\.[0-9]+);", text); print(m.group(1) if m else "")')"
 
           if [[ "$PROJECT_VERSION" != "$CORE_VERSION" ]]; then
             echo "::error::Tag core version ($CORE_VERSION) must match MARKETING_VERSION ($PROJECT_VERSION)."
@@ -61,11 +108,68 @@ jobs:
 
           BUILD_NUMBER="$(python3 -c 'import re,sys; tag=sys.argv[1]; m=re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?", tag); assert m; major,minor,patch=int(m.group(1)),int(m.group(2)),int(m.group(3)); prerelease=m.group(4); core=(major*1_000_000)+(minor*1_000)+patch; beta_match=(re.search(r"(?:beta|b)[.-]?(\d+)$", prerelease, flags=re.IGNORECASE) if prerelease else None); stage=(90_000 if prerelease is None else (min(max(int(beta_match.group(1)),1),89_999) if beta_match else 50_000)); print((core*100_000)+stage)' "$TAG")"
 
+          RENAME_PHASE="${INPUT_RENAME_PHASE:-${VAR_RENAME_PHASE:-transition}}"
+          if [[ "$RENAME_PHASE" != "transition" && "$RENAME_PHASE" != "cleanup" ]]; then
+            echo "::error::rename phase must be 'transition' or 'cleanup' (got '$RENAME_PHASE')"
+            exit 1
+          fi
+
+          LEGACY_FEED_REPO="${INPUT_LEGACY_FEED_REPO:-${VAR_LEGACY_FEED_REPO:-apotenza92/docktor}}"
+          if [[ -n "${INPUT_PUBLISH_LEGACY_APPCASTS:-}" && "${INPUT_PUBLISH_LEGACY_APPCASTS}" != "auto" ]]; then
+            PUBLISH_LEGACY_APPCASTS="${INPUT_PUBLISH_LEGACY_APPCASTS}"
+          else
+            PUBLISH_LEGACY_APPCASTS="${VAR_PUBLISH_LEGACY_APPCASTS:-}"
+          fi
+          if [[ -n "${INPUT_LEGACY_HOMEBREW_ALIAS_MODE:-}" && "${INPUT_LEGACY_HOMEBREW_ALIAS_MODE}" != "auto" ]]; then
+            LEGACY_HOMEBREW_ALIAS_MODE="${INPUT_LEGACY_HOMEBREW_ALIAS_MODE}"
+          else
+            LEGACY_HOMEBREW_ALIAS_MODE="${VAR_LEGACY_HOMEBREW_ALIAS_MODE:-}"
+          fi
+
+          if [[ -n "$PUBLISH_LEGACY_APPCASTS" && "$PUBLISH_LEGACY_APPCASTS" != "true" && "$PUBLISH_LEGACY_APPCASTS" != "false" ]]; then
+            echo "::error::publish_legacy_appcasts must resolve to 'true' or 'false' (got '$PUBLISH_LEGACY_APPCASTS')"
+            exit 1
+          fi
+
+          if [[ -n "$LEGACY_HOMEBREW_ALIAS_MODE" && "$LEGACY_HOMEBREW_ALIAS_MODE" != "keep" && "$LEGACY_HOMEBREW_ALIAS_MODE" != "remove" ]]; then
+            echo "::error::legacy_homebrew_alias_mode must resolve to 'keep' or 'remove' (got '$LEGACY_HOMEBREW_ALIAS_MODE')"
+            exit 1
+          fi
+
+          if [[ "$RENAME_PHASE" == "transition" ]]; then
+            STABLE_BUNDLE_ID="pzc.Dockter"
+            BETA_BUNDLE_ID="pzc.Dockter.beta"
+            FEED_REPO="$LEGACY_FEED_REPO"
+            if [[ -z "$PUBLISH_LEGACY_APPCASTS" ]]; then
+              if [[ "$LEGACY_FEED_REPO" == "$CURRENT_REPOSITORY" ]]; then
+                PUBLISH_LEGACY_APPCASTS="false"
+              else
+                PUBLISH_LEGACY_APPCASTS="true"
+              fi
+            fi
+            if [[ -z "$LEGACY_HOMEBREW_ALIAS_MODE" ]]; then
+              LEGACY_HOMEBREW_ALIAS_MODE="keep"
+            fi
+          else
+            STABLE_BUNDLE_ID="pzc.Dockmint"
+            BETA_BUNDLE_ID="pzc.Dockmint.beta"
+            FEED_REPO="$CURRENT_REPOSITORY"
+            PUBLISH_LEGACY_APPCASTS="${PUBLISH_LEGACY_APPCASTS:-false}"
+            LEGACY_HOMEBREW_ALIAS_MODE="${LEGACY_HOMEBREW_ALIAS_MODE:-remove}"
+          fi
+
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "version_core=$CORE_VERSION" >> "$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
           echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "rename_phase=$RENAME_PHASE" >> "$GITHUB_OUTPUT"
+          echo "stable_bundle_id=$STABLE_BUNDLE_ID" >> "$GITHUB_OUTPUT"
+          echo "beta_bundle_id=$BETA_BUNDLE_ID" >> "$GITHUB_OUTPUT"
+          echo "feed_repo=$FEED_REPO" >> "$GITHUB_OUTPUT"
+          echo "legacy_feed_repo=$LEGACY_FEED_REPO" >> "$GITHUB_OUTPUT"
+          echo "publish_legacy_appcasts=$PUBLISH_LEGACY_APPCASTS" >> "$GITHUB_OUTPUT"
+          echo "legacy_homebrew_alias_mode=$LEGACY_HOMEBREW_ALIAS_MODE" >> "$GITHUB_OUTPUT"
 
       - name: Verify changelog entry exists
         shell: bash
@@ -83,33 +187,29 @@ jobs:
             arch: arm64
             xcode_arch: arm64
             channel: stable
-            product_name: Docktor
-            package_prefix: Docktor
-            bundle_id: pzc.Dockter
+            product_name: Dockmint
+            package_prefix: Dockmint
             app_icon: AppIcon
           - runner: macos-15
             arch: x64
             xcode_arch: x86_64
             channel: stable
-            product_name: Docktor
-            package_prefix: Docktor
-            bundle_id: pzc.Dockter
+            product_name: Dockmint
+            package_prefix: Dockmint
             app_icon: AppIcon
           - runner: macos-15
             arch: arm64
             xcode_arch: arm64
             channel: beta
-            product_name: Docktor Beta
-            package_prefix: Docktor-Beta
-            bundle_id: pzc.Dockter.beta
+            product_name: Dockmint Beta
+            package_prefix: Dockmint-Beta
             app_icon: AppIconBeta
           - runner: macos-15
             arch: x64
             xcode_arch: x86_64
             channel: beta
-            product_name: Docktor Beta
-            package_prefix: Docktor-Beta
-            bundle_id: pzc.Dockter.beta
+            product_name: Dockmint Beta
+            package_prefix: Dockmint-Beta
             app_icon: AppIconBeta
     runs-on: ${{ matrix.runner }}
     steps:
@@ -129,8 +229,8 @@ jobs:
           test -n "$APPLE_SIGNING_CERTIFICATE_P12_BASE64"
           test -n "$APPLE_SIGNING_CERTIFICATE_PASSWORD"
 
-          CERT_PATH="$RUNNER_TEMP/docktor-signing.p12"
-          KEYCHAIN_PATH="$RUNNER_TEMP/docktor.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/dockmint-signing.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/dockmint.keychain-db"
           KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
 
           python3 -c 'import base64, pathlib, sys; pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(sys.argv[2]))' "$CERT_PATH" "$APPLE_SIGNING_CERTIFICATE_P12_BASE64"
@@ -157,8 +257,8 @@ jobs:
 
           for attempt in 1 2 3; do
             if xcodebuild \
-              -project Docktor.xcodeproj \
-              -scheme Docktor \
+              -project Dockmint.xcodeproj \
+              -scheme Dockmint \
               -resolvePackageDependencies \
               -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR"; then
               exit 0
@@ -179,6 +279,9 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VERSION_CORE: ${{ needs.prepare.outputs.version_core }}
           BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+          STABLE_BUNDLE_ID: ${{ needs.prepare.outputs.stable_bundle_id }}
+          BETA_BUNDLE_ID: ${{ needs.prepare.outputs.beta_bundle_id }}
+          FEED_REPO: ${{ needs.prepare.outputs.feed_repo }}
         run: |
           set -euo pipefail
 
@@ -189,10 +292,15 @@ jobs:
           EXPORT_PATH="$RUNNER_TEMP/export-${{ matrix.package_prefix }}-${{ matrix.arch }}"
           EXPORT_OPTIONS_PATH="$RUNNER_TEMP/export-options-${{ matrix.package_prefix }}-${{ matrix.arch }}.plist"
           SOURCE_PACKAGES_DIR="$RUNNER_TEMP/SourcePackages-${{ matrix.channel }}-${{ matrix.arch }}"
+          if [[ "${{ matrix.channel }}" == "beta" ]]; then
+            BUNDLE_ID="$BETA_BUNDLE_ID"
+          else
+            BUNDLE_ID="$STABLE_BUNDLE_ID"
+          fi
 
           xcodebuild \
-            -project Docktor.xcodeproj \
-            -scheme Docktor \
+            -project Dockmint.xcodeproj \
+            -scheme Dockmint \
             -configuration Release \
             -destination "generic/platform=macOS" \
             -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR" \
@@ -206,9 +314,9 @@ jobs:
             MARKETING_VERSION="$VERSION_CORE" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             PRODUCT_NAME="${{ matrix.product_name }}" \
-            PRODUCT_BUNDLE_IDENTIFIER="${{ matrix.bundle_id }}" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
             ASSETCATALOG_COMPILER_APPICON_NAME="${{ matrix.app_icon }}" \
-            SU_FEED_URL="https://raw.githubusercontent.com/apotenza92/docktor/main/appcasts/${{ matrix.channel }}-${{ matrix.arch }}.xml" \
+            SU_FEED_URL="https://raw.githubusercontent.com/${FEED_REPO}/main/appcasts/${{ matrix.channel }}-${{ matrix.arch }}.xml" \
             OTHER_CODE_SIGN_FLAGS="--timestamp"
 
           cat > "$EXPORT_OPTIONS_PATH" <<EOF
@@ -428,6 +536,76 @@ jobs:
           git commit -m "chore: update Sparkle appcasts for ${TAG}"
           git push origin HEAD:main
 
+      - name: Check legacy feed mirror requirements
+        id: legacy_feed
+        env:
+          CURRENT_REPOSITORY: ${{ github.repository }}
+          LEGACY_FEED_REPO: ${{ needs.prepare.outputs.legacy_feed_repo }}
+          PUBLISH_LEGACY_APPCASTS: ${{ needs.prepare.outputs.publish_legacy_appcasts }}
+          LEGACY_FEED_GITHUB_TOKEN: ${{ secrets.LEGACY_FEED_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$PUBLISH_LEGACY_APPCASTS" != "true" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$LEGACY_FEED_REPO" == "$CURRENT_REPOSITORY" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ -z "${LEGACY_FEED_GITHUB_TOKEN:-}" ]]; then
+            echo "::warning::LEGACY_FEED_GITHUB_TOKEN is not configured; skipping legacy Sparkle feed mirror for ${LEGACY_FEED_REPO}."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout legacy feed repo
+        if: ${{ steps.legacy_feed.outputs.enabled == 'true' }}
+        env:
+          LEGACY_FEED_GITHUB_TOKEN: ${{ secrets.LEGACY_FEED_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${LEGACY_FEED_GITHUB_TOKEN}@github.com/${{ needs.prepare.outputs.legacy_feed_repo }}.git" /tmp/legacy-feed-repo
+
+      - name: Update legacy Sparkle appcast files
+        if: ${{ steps.legacy_feed.outputs.enabled == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet cryptography
+          python3 scripts/release/update_sparkle_appcasts.py \
+            --repo "${{ github.repository }}" \
+            --output-dir /tmp/legacy-feed-repo/appcasts \
+            --github-token "$GITHUB_TOKEN" \
+            --require-signatures
+
+      - name: Commit and push legacy appcast updates
+        if: ${{ steps.legacy_feed.outputs.enabled == 'true' }}
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cd /tmp/legacy-feed-repo
+
+          if git diff --quiet -- appcasts; then
+            echo "No legacy Sparkle appcast changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add appcasts/*.xml
+          git commit -m "chore: mirror Dockmint appcasts for ${TAG}"
+          git push origin HEAD:main
+
   update-homebrew-tap:
     needs:
       - prepare
@@ -447,7 +625,7 @@ jobs:
             echo "HOMEBREW_TAP_TOKEN not set; skipping tap update."
           fi
 
-      - name: Checkout Docktor
+      - name: Checkout Dockmint
         if: ${{ steps.tap.outputs.enabled == 'true' }}
         uses: actions/checkout@v4
 
@@ -460,13 +638,16 @@ jobs:
           set -euo pipefail
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/apotenza92/homebrew-tap.git" /tmp/homebrew-tap
 
-      - name: Update Docktor casks
+      - name: Update Dockmint casks
         if: ${{ steps.tap.outputs.enabled == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 scripts/release/update_homebrew_tap_casks.py --tap-path /tmp/homebrew-tap --repo apotenza92/docktor
+          python3 scripts/release/update_homebrew_tap_casks.py \
+            --tap-path /tmp/homebrew-tap \
+            --repo apotenza92/dockmint \
+            --legacy-alias-mode "${{ needs.prepare.outputs.legacy_homebrew_alias_mode }}"
 
       - name: Commit and push tap updates
         if: ${{ steps.tap.outputs.enabled == 'true' }}
@@ -475,14 +656,14 @@ jobs:
           set -euo pipefail
           cd /tmp/homebrew-tap
 
-          git add Casks/docktor.rb Casks/docktor@beta.rb
+          git add -A Casks/dockmint.rb Casks/dockmint@beta.rb Casks/docktor.rb Casks/docktor@beta.rb
 
-          if git diff --cached --quiet -- Casks/docktor.rb Casks/docktor@beta.rb; then
+          if git diff --cached --quiet -- Casks/dockmint.rb Casks/dockmint@beta.rb Casks/docktor.rb Casks/docktor@beta.rb; then
             echo "No Homebrew cask changes to push."
             exit 0
           fi
 
-          git config user.name "docktor-release-bot"
+          git config user.name "dockmint-release-bot"
           git config user.email "actions@users.noreply.github.com"
-          git commit -m "Update Docktor casks from release metadata"
+          git commit -m "Update Dockmint casks from release metadata"
           git push origin main

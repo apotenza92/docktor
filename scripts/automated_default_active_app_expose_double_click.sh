@@ -10,15 +10,15 @@ SECOND_CLICK_HOLD_MS="${SECOND_CLICK_HOLD_MS:-50}"
 MAX_ATTEMPTS_PER_ITER="${MAX_ATTEMPTS_PER_ITER:-4}"
 
 run_test_preflight true
-init_artifact_dir docktor-e2e-default-active-app-expose-double-click >/dev/null
+init_artifact_dir dockmint-e2e-default-active-app-expose-double-click >/dev/null
 
 LOG_FILE="$(artifact_path stress log)"
-DOCKTOR_LOG_FILE="$(artifact_path docktor log)"
+DOCKMINT_LOG_FILE="$(artifact_path dockmint log)"
 : >"$LOG_FILE"
 
 cleanup() {
-  stop_docktor
-  ensure_no_docktor >/dev/null 2>&1 || true
+  stop_dockmint
+  ensure_no_dockmint >/dev/null 2>&1 || true
   restore_dock_state >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -42,15 +42,15 @@ write_pref_bool clickAppExposeRequiresMultipleWindows false
 write_pref_bool firstLaunchCompleted true
 write_pref_bool showOnStartup false
 
-start_docktor "$DOCKTOR_LOG_FILE" >>"$LOG_FILE" 2>&1
-assert_docktor_alive "$DOCKTOR_LOG_FILE" "default active-app App Exposé quick double-click stress" >>"$LOG_FILE" 2>&1
+start_dockmint "$DOCKMINT_LOG_FILE" >>"$LOG_FILE" 2>&1
+assert_dockmint_alive "$DOCKMINT_LOG_FILE" "default active-app App Exposé quick double-click stress" >>"$LOG_FILE" 2>&1
 
 for iter in $(seq 1 "$CYCLES"); do
   echo "ITERATION $iter" >>"$LOG_FILE"
 
-  before_trigger="$(grep -c "WORKFLOW: Triggering App Exposé for $TEST_BUNDLE_A" "$DOCKTOR_LOG_FILE" || true)"
-  before_commit="$(grep -c "WORKFLOW: App Exposé tracking commit confirmed for $TEST_BUNDLE_A" "$DOCKTOR_LOG_FILE" || true)"
-  before_dispatched="$(grep -c "WORKFLOW: App Exposé invoke result target=$TEST_BUNDLE_A dispatched=true" "$DOCKTOR_LOG_FILE" || true)"
+  before_trigger="$(grep -c "WORKFLOW: Triggering App Exposé for $TEST_BUNDLE_A" "$DOCKMINT_LOG_FILE" || true)"
+  before_commit="$(grep -c "WORKFLOW: App Exposé tracking commit confirmed for $TEST_BUNDLE_A" "$DOCKMINT_LOG_FILE" || true)"
+  before_dispatched="$(grep -c "WORKFLOW: App Exposé invoke result target=$TEST_BUNDLE_A dispatched=true" "$DOCKMINT_LOG_FILE" || true)"
 
   after_trigger="$before_trigger"
   after_commit="$before_commit"
@@ -64,9 +64,9 @@ for iter in $(seq 1 "$CYCLES"); do
 
     for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
       sleep 0.15
-      after_trigger="$(grep -c "WORKFLOW: Triggering App Exposé for $TEST_BUNDLE_A" "$DOCKTOR_LOG_FILE" || true)"
-      after_commit="$(grep -c "WORKFLOW: App Exposé tracking commit confirmed for $TEST_BUNDLE_A" "$DOCKTOR_LOG_FILE" || true)"
-      after_dispatched="$(grep -c "WORKFLOW: App Exposé invoke result target=$TEST_BUNDLE_A dispatched=true" "$DOCKTOR_LOG_FILE" || true)"
+      after_trigger="$(grep -c "WORKFLOW: Triggering App Exposé for $TEST_BUNDLE_A" "$DOCKMINT_LOG_FILE" || true)"
+      after_commit="$(grep -c "WORKFLOW: App Exposé tracking commit confirmed for $TEST_BUNDLE_A" "$DOCKMINT_LOG_FILE" || true)"
+      after_dispatched="$(grep -c "WORKFLOW: App Exposé invoke result target=$TEST_BUNDLE_A dispatched=true" "$DOCKMINT_LOG_FILE" || true)"
       if (( after_trigger > before_trigger && (after_commit > before_commit || after_dispatched > before_dispatched) )); then
         success=true
         break
@@ -94,8 +94,8 @@ for iter in $(seq 1 "$CYCLES"); do
     exit 1
   fi
 
-  down_trigger_logs="$(grep -c "source=activeClickMouseDown" "$DOCKTOR_LOG_FILE" || true)"
-  down_schedule_logs="$(grep -c "Scheduling deferred App Exposé from mouse-down" "$DOCKTOR_LOG_FILE" || true)"
+  down_trigger_logs="$(grep -c "source=activeClickMouseDown" "$DOCKMINT_LOG_FILE" || true)"
+  down_schedule_logs="$(grep -c "Scheduling deferred App Exposé from mouse-down" "$DOCKMINT_LOG_FILE" || true)"
   if [[ "$down_trigger_logs" -ne 0 || "$down_schedule_logs" -ne 0 ]]; then
     capture_artifact_screenshot "iter-${iter}-mouse-down-path-failure" >/dev/null
     echo "FAIL removed_mouse_down_path iteration=$iter artifact_dir=$TEST_ARTIFACT_DIR"

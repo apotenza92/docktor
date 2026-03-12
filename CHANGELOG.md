@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file (stable and beta
 ## [Unreleased]
 
 - Ongoing development.
+- Added a documented multi-release Docktor -> Dockmint rollout runbook plus release-time validation for migration phase, legacy appcast mirroring, and canonical `apotenza92/dockmint` release origin checks.
 
 ## [v0.2.1]
 

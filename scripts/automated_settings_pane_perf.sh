@@ -5,12 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/test_common.sh"
 
 RUNS="${RUNS:-5}"
-LOG_ROOT="$HOME/Code/Docktor/logs"
+LOG_ROOT="$HOME/Code/Dockmint/logs"
 
 run_test_preflight false
 
 latest_persistent_log() {
-  ls -t "$LOG_ROOT"/Docktor-*.log 2>/dev/null | head -n 1 || true
+  ls -t "$LOG_ROOT"/Dockmint-*.log 2>/dev/null | head -n 1 || true
 }
 
 wait_for_new_persistent_log() {
@@ -69,19 +69,19 @@ kill_debugserver_parent_if_needed() {
   fi
 }
 
-stop_existing_docktor_instances() {
+stop_existing_dockmint_instances() {
   while IFS= read -r pid; do
     [[ -n "$pid" ]] || continue
     kill_debugserver_parent_if_needed "$pid"
     kill -9 "$pid" >/dev/null 2>&1 || true
-  done < <(pgrep -x Docktor || true)
+  done < <(pgrep -x Dockmint || true)
 }
 
 click_settings_toolbar() {
   local button_title="$1"
   osascript <<APPLESCRIPT >/dev/null
 tell application "System Events"
-  tell process "Docktor"
+  tell process "Dockmint"
     click button "$button_title" of toolbar 1 of window 1
   end tell
 end tell
@@ -109,7 +109,7 @@ PY
 }
 
 echo "[settings-perf] building Debug app"
-xcodebuild -project Docktor.xcodeproj -scheme Docktor -configuration Debug build >/tmp/docktor-settings-perf-build.log
+xcodebuild -project Dockmint.xcodeproj -scheme Dockmint -configuration Debug build >/tmp/dockmint-settings-perf-build.log
 
 declare -a settings_open_values=()
 declare -a pane_switch_app_values=()
@@ -118,9 +118,9 @@ declare -a pane_switch_general_values=()
 declare -a folder_options_warm_values=()
 
 cleanup() {
-  stop_docktor
-  unset DOCKTOR_SETTINGS_PERF
-  unset DOCKTOR_DEBUG_LOG
+  stop_dockmint
+  unset DOCKMINT_SETTINGS_PERF
+  unset DOCKMINT_DEBUG_LOG
 }
 trap cleanup EXIT
 
@@ -128,14 +128,14 @@ mkdir -p "$LOG_ROOT"
 
 for run in $(seq 1 "$RUNS"); do
   echo "[settings-perf] run $run/$RUNS"
-  stop_existing_docktor_instances
-  ensure_no_docktor
+  stop_existing_dockmint_instances
+  ensure_no_dockmint
 
   latest_before="$(latest_persistent_log)"
-  export DOCKTOR_SETTINGS_PERF=1
-  export DOCKTOR_DEBUG_LOG=1
-  shell_log="/tmp/docktor-settings-perf-run-${run}.log"
-  start_docktor "$shell_log" --settings
+  export DOCKMINT_SETTINGS_PERF=1
+  export DOCKMINT_DEBUG_LOG=1
+  shell_log="/tmp/dockmint-settings-perf-run-${run}.log"
+  start_dockmint "$shell_log" --settings
 
   persistent_log="$(wait_for_new_persistent_log "$latest_before" 10)"
   wait_for_pattern_in_file "$persistent_log" "PERF settings_open_end" 10
@@ -166,7 +166,7 @@ for run in $(seq 1 "$RUNS"); do
   echo "  log: $persistent_log"
   echo "  settings_open=${settings_open}ms pane_switch_appActions=${app_actions}ms pane_switch_folderActions=${folder_actions}ms pane_switch_general=${general_ready}ms folder_options_warm=${folder_warm}ms"
 
-  stop_docktor
+  stop_dockmint
   sleep 1
 done
 
