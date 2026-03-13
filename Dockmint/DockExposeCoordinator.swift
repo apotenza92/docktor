@@ -1392,13 +1392,6 @@ final class DockExposeCoordinator: ObservableObject {
             return false
         }
 
-        let releasePoint = DockHitTest.neutralBackgroundPoint(near: context.location)
-        Logger.debug("WORKFLOW: Folder neutral background point path=\(context.folderURL.path) found=\(releasePoint != nil) point=\(releasePoint.map { "(\(Int($0.x)),\(Int($0.y)))" } ?? "nil")")
-        if let releasePoint {
-            postSyntheticMouseUpPassthrough(at: releasePoint, flags: [])
-            Logger.debug("WORKFLOW: Posted neutral folder mouse-up recovery for \(context.folderURL.path) point=(\(Int(releasePoint.x)),\(Int(releasePoint.y)))")
-        }
-
         Logger.log("WORKFLOW: Executing folder click action: \(action.debugName) for \(context.folderURL.path) (modifiers=\(modifierCombination(from: context.flags).rawValue), flags=\(context.flags.rawValue))")
         let succeeded = DockFolderActionExecutor.perform(action, folderURL: context.folderURL)
         Logger.debug("WORKFLOW: Folder executor result path=\(context.folderURL.path) success=\(succeeded) route=\(String(describing: DockFolderActionExecutor.executionRoute(for: action)))")

@@ -37,7 +37,7 @@ enum DockFolderActionExecutor {
         case .dock:
             return openWithDock(action, folderURL: folderURL)
         case .finderPassthrough:
-            return openInFinderPreservingExistingWindow(folderURL)
+            return openInFinderPreservingExistingWindowAsync(folderURL)
         case .customApplication:
             return open(folderURL, withApplicationIdentifier: action.openInApplicationIdentifier)
         case .finderScripted:
@@ -145,13 +145,18 @@ enum DockFolderActionExecutor {
     }
 
 
-    private static func openInFinderPreservingExistingWindow(_ folderURL: URL) -> Bool {
+    private static func openInFinderPreservingExistingWindowAsync(_ folderURL: URL) -> Bool {
         let standardizedFolderURL = folderURL.standardizedFileURL
-        if focusExistingFinderWindow(for: standardizedFolderURL) {
-            Logger.debug("DockFolderActionExecutor: Reused existing Finder window for \(standardizedFolderURL.path)")
-            return true
+        DispatchQueue.global(qos: .userInitiated).async {
+            if focusExistingFinderWindow(for: standardizedFolderURL) {
+                Logger.debug("DockFolderActionExecutor: Reused existing Finder window for \(standardizedFolderURL.path)")
+            } else {
+                DispatchQueue.main.async {
+                    _ = open(standardizedFolderURL, withApplicationIdentifier: DockFolderOpenApplicationCatalog.finderBundleIdentifier)
+                }
+            }
         }
-        return open(standardizedFolderURL, withApplicationIdentifier: DockFolderOpenApplicationCatalog.finderBundleIdentifier)
+        return true
     }
 
     private static func focusExistingFinderWindow(for folderURL: URL) -> Bool {
