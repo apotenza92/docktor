@@ -5,19 +5,18 @@
     <description>Dockmint update feed (stable channel)</description>
     <language>en</language>
     <item>
-      <title>Version 0.2.8</title>
-      <link>https://github.com/apotenza92/dockmint/releases/tag/v0.2.8</link>
-      <sparkle:version>200890000</sparkle:version>
-      <sparkle:shortVersionString>0.2.8</sparkle:shortVersionString>
+      <title>Version 0.2.9</title>
+      <link>https://github.com/apotenza92/dockmint/releases/tag/v0.2.9</link>
+      <sparkle:version>200990000</sparkle:version>
+      <sparkle:shortVersionString>0.2.9</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
       <sparkle:fullReleaseNotesLink>https://github.com/apotenza92/dockmint/blob/main/CHANGELOG.md</sparkle:fullReleaseNotesLink>
-      <description sparkle:format="plain-text"><![CDATA[- Reissued the onboarding and single-click App Exposé update after fixing Swift 6 actor-isolation build failures that blocked CI and signed release packaging for the `v0.2.7` tag.
-- Refreshed the GUI automation fixtures to rely on built-in macOS apps only, using Finder for 1-window Dock checks and TextEdit/Safari for multi-window coverage while forcing real separate windows even when the host prefers tabs.
-- Revalidated the shipped defaults and focused App Exposé flows with the refreshed built-in GUI suites, including default-install checks, active-app App Exposé stress, and the Dock context-menu guard.]]></description>
-      <pubDate>Sun, 15 Mar 2026 13:47:02 +0000</pubDate>
-      <enclosure url="https://github.com/apotenza92/dockmint/releases/download/v0.2.8/Dockmint-v0.2.8-macos-x64.zip"
-                 sparkle:edSignature="VMzo9J6JrT9zhWgo0tXSqaS9sXjK2LHoWRqVRS1WvDOeYOsP98wpZshVAVSmzk6DuBXW2Pv+uYgOH9B/ilaZDw=="
-                 length="4770953"
+      <description sparkle:format="plain-text"><![CDATA[- Reverted the experimental cross-space and App Exposé work back to the stable `v0.2.8` baseline.
+- Changed the shipped default for app Dock icon `Shift+Option+click` to `Quit App` for fresh installs and Reset App Actions to Defaults.]]></description>
+      <pubDate>Thu, 26 Mar 2026 04:05:39 +0000</pubDate>
+      <enclosure url="https://github.com/apotenza92/dockmint/releases/download/v0.2.9/Dockmint-v0.2.9-macos-x64.zip"
+                 sparkle:edSignature="usWnR+ecwJVB95ZXvvcIH986gd1njCh+jyr+GRL+xIT69dkQf5HHUVQyw+lP0rnm23J8oH2yK5V/TPNOxuYcAQ=="
+                 length="4771013"
                  type="application/octet-stream" />
     </item>
   </channel>
