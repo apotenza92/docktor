@@ -1191,6 +1191,23 @@ final class DockExposeCoordinator: ObservableObject {
             }
         }
 
+        if DockDecisionEngine.shouldResetStaleAppExposeTracking(
+            trackedBundle: currentExposeApp ?? lastTriggeredBundle,
+            clickedBundle: clickedBundle,
+            frontmostBefore: frontmostBefore,
+            isRecentInteraction: isRecentExposeInteraction(maxAge: exposeTrackingExpiryWindow)
+        ) {
+            Logger.debug("WORKFLOW: Clearing stale App Exposé tracking before active click for \(clickedBundle)")
+            resetExposeTracking()
+            return executeFirstClickAction(for: clickedBundle,
+                                           at: location,
+                                           flags: flags,
+                                           frontmostBefore: frontmostBefore,
+                                           appState: context.appState,
+                                           windowCountHint: context.windowCountAtMouseDown,
+                                           forceActivateFallback: context.forceFirstClickActivateFallback)
+        }
+
         if let lastBundle = lastTriggeredBundle, lastBundle == clickedBundle {
             if frontmostBefore == clickedBundle {
                 Logger.debug("WORKFLOW: App Exposé close/dismiss path for \(clickedBundle); forcing cleanup")
@@ -2051,20 +2068,38 @@ final class DockExposeCoordinator: ObservableObject {
     }
 
 
-    private func scheduleExposeTrackingExpiry(for bundleIdentifier: String) {
+    private func scheduleExposeTrackingExpiry(for bundleIdentifier: String,
+                                              after delay: TimeInterval? = nil) {
         exposeTrackingExpiryTokenCounter += 1
         let token = exposeTrackingExpiryTokenCounter
+        let expiryDelay = delay ?? exposeTrackingExpiryWindow
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + exposeTrackingExpiryWindow) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + expiryDelay) { [weak self] in
             guard let self else { return }
             guard token == self.exposeTrackingExpiryTokenCounter else { return }
             guard self.appExposeInvocationToken == nil else { return }
             guard self.currentExposeApp == bundleIdentifier || self.lastTriggeredBundle == bundleIdentifier else { return }
-            guard self.isRecentExposeInteraction(maxAge: self.exposeTrackingExpiryWindow) else {
-                Logger.debug("WORKFLOW: Expiring App Exposé tracking target=\(bundleIdentifier) after inactivity window")
+
+            guard let lastExposeInteractionAt = self.lastExposeInteractionAt else {
+                Logger.debug("WORKFLOW: Expiring App Exposé tracking target=\(bundleIdentifier) with missing interaction timestamp")
                 self.resetExposeTracking()
                 return
             }
+
+            let interactionAge = Date().timeIntervalSince(lastExposeInteractionAt)
+            if let rescheduleDelay = DockDecisionEngine.appExposeTrackingExpiryDelay(
+                timeSinceLastInteraction: interactionAge,
+                expiryWindow: self.exposeTrackingExpiryWindow,
+                minimumDelay: 0.05
+            ) {
+                Logger.debug("WORKFLOW: Retaining App Exposé tracking target=\(bundleIdentifier) interactionAgeMs=\(Int(interactionAge * 1000)) rescheduleMs=\(Int(rescheduleDelay * 1000))")
+                self.scheduleExposeTrackingExpiry(for: bundleIdentifier,
+                                                  after: rescheduleDelay)
+                return
+            }
+
+            Logger.debug("WORKFLOW: Expiring App Exposé tracking target=\(bundleIdentifier) after inactivity window")
+            self.resetExposeTracking()
         }
     }
 

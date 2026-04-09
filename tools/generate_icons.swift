@@ -38,23 +38,23 @@ let specs: [IconSpec] = [
 ]
 
 let stableTheme = IconTheme(
-    baseTop: NSColor(calibratedRed: 0.77, green: 0.98, blue: 0.89, alpha: 1.0),
-    baseBottom: NSColor(calibratedRed: 0.08, green: 0.73, blue: 0.55, alpha: 1.0),
-    diagonalTop: NSColor(calibratedRed: 0.96, green: 1.00, blue: 0.98, alpha: 0.36),
-    diagonalMid: NSColor(calibratedRed: 0.41, green: 0.93, blue: 0.77, alpha: 0.11),
-    diagonalBottom: NSColor(calibratedRed: 0.03, green: 0.53, blue: 0.40, alpha: 0.24),
-    vignetteBottom: NSColor(calibratedRed: 0.02, green: 0.34, blue: 0.25, alpha: 0.20),
+    baseTop: NSColor(calibratedRed: 0.71, green: 0.92, blue: 0.84, alpha: 1.0),
+    baseBottom: NSColor(calibratedRed: 0.05, green: 0.66, blue: 0.49, alpha: 1.0),
+    diagonalTop: NSColor(calibratedRed: 0.92, green: 0.98, blue: 0.95, alpha: 0.30),
+    diagonalMid: NSColor(calibratedRed: 0.34, green: 0.84, blue: 0.69, alpha: 0.10),
+    diagonalBottom: NSColor(calibratedRed: 0.02, green: 0.44, blue: 0.33, alpha: 0.28),
+    vignetteBottom: NSColor(calibratedRed: 0.01, green: 0.26, blue: 0.19, alpha: 0.24),
     glyphTopAlpha: 0.99,
     glyphBottomAlpha: 0.74
 )
 
 let betaTheme = IconTheme(
-    baseTop: NSColor(calibratedRed: 0.58, green: 0.79, blue: 1.00, alpha: 1.0),
-    baseBottom: NSColor(calibratedRed: 0.29, green: 0.27, blue: 0.82, alpha: 1.0),
-    diagonalTop: NSColor(calibratedRed: 0.92, green: 0.96, blue: 1.00, alpha: 0.36),
-    diagonalMid: NSColor(calibratedRed: 0.60, green: 0.72, blue: 1.00, alpha: 0.11),
-    diagonalBottom: NSColor(calibratedRed: 0.20, green: 0.18, blue: 0.58, alpha: 0.24),
-    vignetteBottom: NSColor(calibratedRed: 0.12, green: 0.11, blue: 0.33, alpha: 0.22),
+    baseTop: NSColor(calibratedRed: 0.50, green: 0.72, blue: 0.95, alpha: 1.0),
+    baseBottom: NSColor(calibratedRed: 0.23, green: 0.21, blue: 0.72, alpha: 1.0),
+    diagonalTop: NSColor(calibratedRed: 0.88, green: 0.93, blue: 1.00, alpha: 0.30),
+    diagonalMid: NSColor(calibratedRed: 0.52, green: 0.64, blue: 0.96, alpha: 0.10),
+    diagonalBottom: NSColor(calibratedRed: 0.15, green: 0.14, blue: 0.48, alpha: 0.28),
+    vignetteBottom: NSColor(calibratedRed: 0.09, green: 0.08, blue: 0.27, alpha: 0.25),
     glyphTopAlpha: 0.99,
     glyphBottomAlpha: 0.74
 )
@@ -80,46 +80,74 @@ func newStrokePath(lineWidth: CGFloat) -> NSBezierPath {
     return path
 }
 
-func lucidePoint(_ x: CGFloat, _ y: CGFloat, in rect: NSRect) -> NSPoint {
-    NSPoint(
-        x: rect.minX + rect.width * (x / 24.0),
-        y: rect.minY + rect.height * ((24.0 - y) / 24.0)
+private let referenceViewBox = NSSize(width: 1000.0, height: 1000.0)
+
+func fittedReferenceRect(in rect: NSRect, scale: CGFloat = 1.01, yOffset: CGFloat = 0.01) -> NSRect {
+    let fitted = NSSize(width: rect.height * (referenceViewBox.width / referenceViewBox.height), height: rect.height)
+    let scaled = NSSize(width: fitted.width * scale, height: fitted.height * scale)
+    return NSRect(
+        x: rect.midX - scaled.width / 2.0,
+        y: rect.midY - scaled.height / 2.0 + rect.height * yOffset,
+        width: scaled.width,
+        height: scaled.height
     )
+}
+
+func referencePoint(_ x: CGFloat, _ y: CGFloat, in rect: NSRect) -> NSPoint {
+    NSPoint(
+        x: rect.minX + rect.width * (x / referenceViewBox.width),
+        y: rect.minY + rect.height * (1.0 - (y / referenceViewBox.height))
+    )
+}
+
+func leafPath(in rect: NSRect) -> NSBezierPath {
+    let leaf = NSBezierPath()
+    leaf.move(to: referencePoint(799.846, 118.449, in: rect))
+    leaf.curve(to: referencePoint(846.087, 430.357, in: rect),
+               controlPoint1: referencePoint(799.846, 118.449, in: rect),
+               controlPoint2: referencePoint(892.934, 239.215, in: rect))
+    leaf.curve(to: referencePoint(318.622, 751.420, in: rect),
+               controlPoint1: referencePoint(796.649, 632.069, in: rect),
+               controlPoint2: referencePoint(480.967, 943.975, in: rect))
+    leaf.curve(to: referencePoint(799.846, 118.449, in: rect),
+               controlPoint1: referencePoint(111.051, 505.224, in: rect),
+               controlPoint2: referencePoint(799.846, 118.449, in: rect))
+    leaf.close()
+    return leaf
+}
+
+func veinPath(in rect: NSRect, lineWidth: CGFloat) -> NSBezierPath {
+    let vein = newStrokePath(lineWidth: lineWidth)
+    vein.move(to: referencePoint(140.732, 839.032, in: rect))
+    vein.curve(to: referencePoint(500.417, 606.490, in: rect),
+               controlPoint1: referencePoint(140.732, 839.032, in: rect),
+               controlPoint2: referencePoint(336.615, 765.537, in: rect))
+    vein.curve(to: referencePoint(720.674, 336.010, in: rect),
+               controlPoint1: referencePoint(703.268, 409.526, in: rect),
+               controlPoint2: referencePoint(720.674, 336.010, in: rect))
+    return vein
 }
 
 func drawLeafGlyph(
     in rect: NSRect,
-    strokeColor: NSColor,
+    topColor: NSColor,
+    bottomColor: NSColor,
+    veinColor: NSColor,
     lineWidth: CGFloat
 ) {
-    strokeColor.setStroke()
     let strokeWidth = lineWidth * min(rect.width, rect.height) / 24.0
 
-    let leaf = newStrokePath(lineWidth: strokeWidth)
-    leaf.move(to: lucidePoint(11.0, 20.0, in: rect))
-    leaf.curve(to: lucidePoint(9.8, 6.1, in: rect),
-               controlPoint1: lucidePoint(7.2, 18.0, in: rect),
-               controlPoint2: lucidePoint(6.9, 9.7, in: rect))
-    leaf.curve(to: lucidePoint(19.0, 2.0, in: rect),
-               controlPoint1: lucidePoint(15.5, 5.0, in: rect),
-               controlPoint2: lucidePoint(17.0, 4.48, in: rect))
-    leaf.curve(to: lucidePoint(21.0, 10.0, in: rect),
-               controlPoint1: lucidePoint(20.0, 4.0, in: rect),
-               controlPoint2: lucidePoint(21.0, 6.18, in: rect))
-    leaf.curve(to: lucidePoint(11.0, 20.0, in: rect),
-               controlPoint1: lucidePoint(21.0, 15.5, in: rect),
-               controlPoint2: lucidePoint(16.22, 20.0, in: rect))
-    leaf.close()
-    leaf.stroke()
+    let fittedRect = fittedReferenceRect(in: rect)
+    let leaf = leafPath(in: fittedRect)
+    let vein = veinPath(in: fittedRect, lineWidth: strokeWidth * 0.50)
 
-    let vein = newStrokePath(lineWidth: strokeWidth)
-    vein.move(to: lucidePoint(2.0, 21.0, in: rect))
-    vein.curve(to: lucidePoint(7.08, 15.0, in: rect),
-               controlPoint1: lucidePoint(2.0, 18.0, in: rect),
-               controlPoint2: lucidePoint(3.85, 15.64, in: rect))
-    vein.curve(to: lucidePoint(13.0, 12.0, in: rect),
-               controlPoint1: lucidePoint(9.5, 14.52, in: rect),
-               controlPoint2: lucidePoint(12.0, 13.0, in: rect))
+    NSGraphicsContext.saveGraphicsState()
+    leaf.addClip()
+    let glyphGradient = NSGradient(colors: [topColor, bottomColor])!
+    glyphGradient.draw(in: leaf.bounds, angle: -90)
+    NSGraphicsContext.restoreGraphicsState()
+
+    veinColor.setStroke()
     vein.stroke()
 }
 
@@ -160,11 +188,13 @@ func drawIcon(size: Int, theme: IconTheme) -> NSImage {
 
     NSGraphicsContext.restoreGraphicsState()
 
-    let glyphRect = outerRect.insetBy(dx: s * 0.10, dy: s * 0.10)
+    let glyphRect = outerRect.insetBy(dx: s * 0.065, dy: s * 0.065)
 
     drawLeafGlyph(
         in: glyphRect,
-        strokeColor: NSColor(calibratedWhite: 1.0, alpha: theme.glyphTopAlpha),
+        topColor: NSColor(calibratedWhite: 1.0, alpha: theme.glyphTopAlpha * 0.71),
+        bottomColor: NSColor(calibratedWhite: 1.0, alpha: theme.glyphBottomAlpha * 0.55),
+        veinColor: NSColor(calibratedWhite: 1.0, alpha: 0.99),
         lineWidth: 2.0
     )
 

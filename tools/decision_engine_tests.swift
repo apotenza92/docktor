@@ -82,6 +82,44 @@ func runDecisionEngineTests() {
         "unconfirmed invocation should not commit expose tracking"
     )
 
+    expect(
+        DockDecisionEngine.shouldResetStaleAppExposeTracking(
+            trackedBundle: "com.apple.Safari",
+            clickedBundle: "com.apple.Safari",
+            frontmostBefore: "com.apple.Safari",
+            isRecentInteraction: false
+        ) == true,
+        "stale expose tracking should reset for same active app"
+    )
+
+    expect(
+        DockDecisionEngine.shouldResetStaleAppExposeTracking(
+            trackedBundle: "com.apple.Safari",
+            clickedBundle: "com.apple.Safari",
+            frontmostBefore: "com.apple.Safari",
+            isRecentInteraction: true
+        ) == false,
+        "recent expose tracking should stay active for same active app"
+    )
+
+    expect(
+        DockDecisionEngine.appExposeTrackingExpiryDelay(
+            timeSinceLastInteraction: 0.2,
+            expiryWindow: 0.9,
+            minimumDelay: 0.05
+        ) == 0.7,
+        "expiry delay should use the remaining inactivity window"
+    )
+
+    expect(
+        DockDecisionEngine.appExposeTrackingExpiryDelay(
+            timeSinceLastInteraction: 0.9,
+            expiryWindow: 0.9,
+            minimumDelay: 0.05
+        ) == nil,
+        "expiry delay should expire once the inactivity window has elapsed"
+    )
+
     // shouldConsumeFirstClickPlainAction
     expect(
         DockDecisionEngine.shouldConsumeFirstClickPlainAction(

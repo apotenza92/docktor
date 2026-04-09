@@ -55,6 +55,23 @@ enum DockDecisionEngine {
         invocationConfirmed
     }
 
+    static func shouldResetStaleAppExposeTracking(trackedBundle: String?,
+                                                  clickedBundle: String,
+                                                  frontmostBefore: String?,
+                                                  isRecentInteraction: Bool) -> Bool {
+        guard let trackedBundle else { return false }
+        guard trackedBundle == clickedBundle else { return false }
+        guard frontmostBefore == clickedBundle else { return false }
+        return !isRecentInteraction
+    }
+
+    static func appExposeTrackingExpiryDelay(timeSinceLastInteraction: TimeInterval,
+                                             expiryWindow: TimeInterval,
+                                             minimumDelay: TimeInterval) -> TimeInterval? {
+        guard timeSinceLastInteraction < expiryWindow else { return nil }
+        return max(minimumDelay, expiryWindow - timeSinceLastInteraction)
+    }
+
     static func shouldRunFirstClickAppExpose(windowCount: Int,
                                              requiresMultipleWindows: Bool) -> Bool {
         guard windowCount > 0 else { return false }

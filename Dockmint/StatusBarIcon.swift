@@ -15,68 +15,129 @@ enum StatusBarIcon {
                 height: rect.height - inset * 2
             )
 
-            drawLeafGlyph(in: glyphRect, lineWidth: 2.0)
+            drawLeafGlyph(in: glyphRect)
             return true
         }
         image.isTemplate = isTemplate
         return image
     }
 
-    private static func newStrokePath(lineWidth: CGFloat) -> NSBezierPath {
-        let path = NSBezierPath()
-        path.lineWidth = lineWidth
-        path.lineJoinStyle = .round
-        path.lineCapStyle = .round
-        return path
+    private static let referenceViewBox = NSSize(width: 1000.0, height: 1000.0)
+    private static let leafAffine = CGAffineTransform(
+        a: -1.66155,
+        b: -0.959297,
+        c: -0.628757,
+        d: 1.089039,
+        tx: 1664.712115,
+        ty: 471.805902
+    )
+    private static let stemAffine = CGAffineTransform(
+        a: -0.518933,
+        b: -0.420401,
+        c: -0.108986,
+        d: 0.156395,
+        tx: 492.769665,
+        ty: 925.252616
+    )
+
+    private static func fittedReferenceRect(in rect: NSRect, scale: CGFloat = 1.12, yOffset: CGFloat = 0.01) -> NSRect {
+        let fitted = NSSize(width: rect.height * (referenceViewBox.width / referenceViewBox.height), height: rect.height)
+        let scaled = NSSize(width: fitted.width * scale, height: fitted.height * scale)
+        return NSRect(
+            x: rect.midX - scaled.width / 2.0,
+            y: rect.midY - scaled.height / 2.0 + rect.height * yOffset,
+            width: scaled.width,
+            height: scaled.height
+        )
     }
 
-    private static func lucidePoint(_ x: CGFloat, _ y: CGFloat, in rect: NSRect) -> NSPoint {
-        NSPoint(
-            x: rect.minX + rect.width * (x / 24.0),
-            y: rect.minY + rect.height * ((24.0 - y) / 24.0)
-        )
+    private static func sourcePoint(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+        CGPoint(x: x, y: y)
     }
 
-    private static func drawLeafGlyph(in rect: NSRect, lineWidth: CGFloat) {
-        let strokeWidth = lineWidth * min(rect.width, rect.height) / 24.0
+    private static func drawingTransform(for rect: NSRect) -> CGAffineTransform {
+        var transform = CGAffineTransform(translationX: rect.minX, y: rect.maxY)
+        transform = transform.scaledBy(
+            x: rect.width / referenceViewBox.width,
+            y: -rect.height / referenceViewBox.height
+        )
+        return transform
+    }
 
-        let leaf = newStrokePath(lineWidth: strokeWidth)
-        leaf.move(to: lucidePoint(11.0, 20.0, in: rect))
-        leaf.curve(
-            to: lucidePoint(9.8, 6.1, in: rect),
-            controlPoint1: lucidePoint(7.2, 18.0, in: rect),
-            controlPoint2: lucidePoint(6.9, 9.7, in: rect)
+    private static func referenceLeafPath() -> CGPath {
+        let path = CGMutablePath()
+        path.move(to: sourcePoint(496.366, 64.337))
+        path.addCurve(
+            to: sourcePoint(405.654, 240.339),
+            control1: sourcePoint(496.366, 64.337),
+            control2: sourcePoint(460.654, 51.382)
         )
-        leaf.curve(
-            to: lucidePoint(19.0, 2.0, in: rect),
-            controlPoint1: lucidePoint(15.5, 5.0, in: rect),
-            controlPoint2: lucidePoint(17.0, 4.48, in: rect)
+        path.addCurve(
+            to: sourcePoint(542.995, 683.745),
+            control1: sourcePoint(347.612, 439.746),
+            control2: sourcePoint(366.104, 754.969)
         )
-        leaf.curve(
-            to: lucidePoint(21.0, 10.0, in: rect),
-            controlPoint1: lucidePoint(20.0, 4.0, in: rect),
-            controlPoint2: lucidePoint(21.0, 6.18, in: rect)
+        path.addCurve(
+            to: sourcePoint(573.28, 343.052),
+            control1: sourcePoint(641.586, 644.048),
+            control2: sourcePoint(601.525, 462.418)
         )
-        leaf.curve(
-            to: lucidePoint(11.0, 20.0, in: rect),
-            controlPoint1: lucidePoint(21.0, 15.5, in: rect),
-            controlPoint2: lucidePoint(16.22, 20.0, in: rect)
+        path.addCurve(
+            to: sourcePoint(496.366, 64.337),
+            control1: sourcePoint(509.198, 72.236),
+            control2: sourcePoint(496.366, 64.337)
         )
-        leaf.close()
-        leaf.fill()
+        path.closeSubpath()
 
-        let vein = newStrokePath(lineWidth: strokeWidth)
-        vein.move(to: lucidePoint(2.0, 21.0, in: rect))
-        vein.curve(
-            to: lucidePoint(7.08, 15.0, in: rect),
-            controlPoint1: lucidePoint(2.0, 18.0, in: rect),
-            controlPoint2: lucidePoint(3.85, 15.64, in: rect)
+        var transform = leafAffine
+        return path.copy(using: &transform) ?? path
+    }
+
+    private static func referenceStemFillPath() -> CGPath {
+        let path = CGMutablePath()
+        path.move(to: sourcePoint(413.769, -615.48))
+        path.addCurve(
+            to: sourcePoint(568.796, 949.941),
+            control1: sourcePoint(413.769, -615.48),
+            control2: sourcePoint(528.885, 590.915)
         )
-        vein.curve(
-            to: lucidePoint(13.0, 12.0, in: rect),
-            controlPoint1: lucidePoint(9.5, 14.52, in: rect),
-            controlPoint2: lucidePoint(12.0, 13.0, in: rect)
+        path.addCurve(
+            to: sourcePoint(434.067, 1056.694),
+            control1: sourcePoint(598.702, 1218.965),
+            control2: sourcePoint(467.411, 1387.05)
         )
-        vein.stroke()
+        path.addCurve(
+            to: sourcePoint(279.21, -590.967),
+            control1: sourcePoint(398.865, 707.946),
+            control2: sourcePoint(279.21, -590.967)
+        )
+        path.addLine(to: sourcePoint(413.769, -615.48))
+        path.closeSubpath()
+
+        var transform = stemAffine
+        return path.copy(using: &transform) ?? path
+    }
+
+    private static func drawLeafGlyph(in rect: NSRect) {
+        let fittedRect = fittedReferenceRect(in: rect)
+        let transform = drawingTransform(for: fittedRect)
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+
+        context.saveGState()
+        defer { context.restoreGState() }
+
+        context.setFillColor(NSColor.black.cgColor)
+
+        var leafTransform = transform
+        if let leaf = referenceLeafPath().copy(using: &leafTransform) {
+            context.addPath(leaf)
+            context.fillPath()
+        }
+
+        var stemTransform = transform
+        if let stem = referenceStemFillPath().copy(using: &stemTransform) {
+            context.addPath(stem)
+            context.fillPath()
+        }
     }
 }

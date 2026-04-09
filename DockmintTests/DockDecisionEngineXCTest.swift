@@ -74,6 +74,61 @@ final class DockDecisionEngineXCTest: XCTestCase {
         XCTAssertFalse(DockDecisionEngine.shouldCommitAppExposeTracking(invocationConfirmed: false))
     }
 
+    func testStaleAppExposeTrackingResetRules() {
+        XCTAssertTrue(
+            DockDecisionEngine.shouldResetStaleAppExposeTracking(
+                trackedBundle: "com.apple.Safari",
+                clickedBundle: "com.apple.Safari",
+                frontmostBefore: "com.apple.Safari",
+                isRecentInteraction: false
+            )
+        )
+
+        XCTAssertFalse(
+            DockDecisionEngine.shouldResetStaleAppExposeTracking(
+                trackedBundle: "com.apple.Safari",
+                clickedBundle: "com.apple.Safari",
+                frontmostBefore: "com.apple.Safari",
+                isRecentInteraction: true
+            )
+        )
+
+        XCTAssertFalse(
+            DockDecisionEngine.shouldResetStaleAppExposeTracking(
+                trackedBundle: "com.apple.Safari",
+                clickedBundle: "com.apple.finder",
+                frontmostBefore: "com.apple.finder",
+                isRecentInteraction: false
+            )
+        )
+    }
+
+    func testAppExposeTrackingExpiryDelayRules() {
+        let standardDelay = DockDecisionEngine.appExposeTrackingExpiryDelay(
+            timeSinceLastInteraction: 0.2,
+            expiryWindow: 0.9,
+            minimumDelay: 0.05
+        )
+        XCTAssertNotNil(standardDelay)
+        XCTAssertEqual(standardDelay!, 0.7, accuracy: 0.0001)
+
+        let minimumDelay = DockDecisionEngine.appExposeTrackingExpiryDelay(
+            timeSinceLastInteraction: 0.88,
+            expiryWindow: 0.9,
+            minimumDelay: 0.05
+        )
+        XCTAssertNotNil(minimumDelay)
+        XCTAssertEqual(minimumDelay!, 0.05, accuracy: 0.0001)
+
+        XCTAssertNil(
+            DockDecisionEngine.appExposeTrackingExpiryDelay(
+                timeSinceLastInteraction: 0.9,
+                expiryWindow: 0.9,
+                minimumDelay: 0.05
+            )
+        )
+    }
+
     func testPlainFirstClickConsumeBehavior() {
         XCTAssertFalse(
             DockDecisionEngine.shouldConsumeFirstClickPlainAction(

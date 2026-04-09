@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file (stable and beta
 
 - Ongoing development.
 
+## [v0.3.1]
+
+- Fixed stale App Exposé tracking so same-app active Dock clicks reset cleanly after inactivity, while the dismissal state now expires based on the latest real interaction instead of a fixed timer.
+- Refreshed the stable and beta app icons with the new filled leaf treatment and updated the matching website icon exports.
+- Replaced the menu bar leaf with a new filled SVG-derived glyph and tuned its sizing for clearer 16-18pt menu bar legibility.
+
 ## [v0.3.0]
 
 - Fixed the shipped `Shift+Option+click` quit path so consumed modifier clicks now intercept on mouse-down instead of leaving the Dock press alive long enough to open the Dock item context menu.
